@@ -188,7 +188,9 @@
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
     drawBoard();
     $('generate-button').disabled = false;
-  } catch {
+  } catch (error) {
     showLoadError();
+    const detail = window.CLIMBGEN_LOAD_ERROR || error?.message;
+    if (detail) $('route-copy').textContent += ` (${detail})`;
   }
 })();

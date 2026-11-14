@@ -16,6 +16,8 @@ html = (ROOT / "index.shell.html").read_text()
 replacements = {
     "<!-- INLINE_STYLES -->": '<link rel="stylesheet" href="./styles.css" />',
     "<!-- INLINE_DATA -->": (
+        '<script>window.addEventListener("error", event => '
+        '{ window.CLIMBGEN_LOAD_ERROR = event.message || "script load error"; });</script>\n'
         '<script src="./data/tb2-mirror-40.js"></script>\n'
         '<script>window.CLIMBGEN_ASSETS = '
         '{"wood":"./assets/tb2-12x12-mirror-wood.png",'
