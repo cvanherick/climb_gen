@@ -9,6 +9,7 @@
   const board = { left: -68, right: 68, bottom: 0, top: 144, x: 20, y: 13.26, width: 560, height: 593.48 };
   const holdMap = new Map();
   let dataset, generatedCount = 0, animationTimer, betaTimer, generating = false, currentProblem = null;
+  const usedCandidates = new Map();
 
   function point(x, y) {
     return {
@@ -136,7 +137,19 @@
     const typedName = $('climb-name').value.trim();
     const climbName = typedName || `Climb ${String(generatedCount + 1).padStart(2, '0')}`;
     const seed = hashName(`${climbName}|${targetGrade}|${generatedCount}`);
-    const candidate = pool[seed % pool.length];
+    const seen = usedCandidates.get(targetGrade) || new Set();
+    let candidate = null;
+    for (let offset = 0; offset < pool.length; offset++) {
+      const option = pool[(seed + offset) % pool.length];
+      const signature = keyFor(option.holds);
+      if (!seen.has(signature)) { candidate = option; seen.add(signature); break; }
+    }
+    if (!candidate) {
+      seen.clear();
+      candidate = pool[seed % pool.length];
+      seen.add(keyFor(candidate.holds));
+    }
+    usedCandidates.set(targetGrade, seen);
     if (!Array.isArray(candidate.holds) || !Array.isArray(candidate.plan)) throw new Error('Prepared TB2 problem is invalid');
     return {
       holds: routeHolds(candidate),
@@ -156,7 +169,7 @@
     $('hold-count').textContent = problem.holds.length;
     $('move-count').textContent = problem.plan.length;
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
-    $('beta-status').textContent = 'REACH CHECKED';
+    $('beta-status').textContent = 'BETA HIDDEN';
     $('beta-button').hidden = false;
     $('beta-button').disabled = false;
     $('beta-button').textContent = 'Reveal beta animation';
@@ -164,13 +177,16 @@
     $('board-status').classList.add('ready');
     $('board-hint').classList.add('hidden');
     const list = $('sequence-list');
-    list.replaceChildren();
-    problem.plan.forEach((step, i) => list.append(sequenceItem(i + 1, step.id, step.limb, step.role === 7 ? 'finish' : 'hand')));
+    list.replaceChildren(sequenceItem(null, null, 'Hidden until revealed', 'empty'));
     drawBoard(problem, -1);
-    animatePlan(problem);
   }
   function sequenceItem(number, id, label, role) {
     const li = document.createElement('li');
+    if (id == null) {
+      li.className = 'sequence-empty';
+      li.textContent = label;
+      return li;
+    }
     const hold = holdMap.get(String(id));
     li.dataset.holdId = id;
     li.innerHTML = `<span class="step-number">${number == null ? '·' : String(number).padStart(2, '0')}</span><i class="step-dot ${role}"></i><span class="step-hold">${hold.label} <small>#${id}</small></span><span class="step-limb">${label}</span>`;
@@ -212,27 +228,60 @@
     const leftFoot = orderedFeet.find((p) => p.x <= centerX) || orderedFeet[0] || leftStart;
     const rightFoot = orderedFeet.find((p) => p.x >= centerX && p.id !== leftFoot.id) || orderedFeet.find((p) => p.id !== leftFoot.id) || rightFootFallback();
     function rightFootFallback() { return orderedFeet[0] || rightStart; }
-    const contacts = { leftHand: leftStart, rightHand: rightStart, leftFoot, rightFoot };
-    const plannedFootPositions = { leftFoot, rightFoot };
-    const steps = [];
-    const handSteps = problem.plan.filter((s) => s.role !== 7);
-    const finish = problem.plan.find((s) => s.role === 7);
-    const handPositions = { leftHand: leftStart, rightHand: rightStart };
-    for (const step of handSteps) {
-      const limb = limbFor(step.limb), released = handPositions[limb];
-      steps.push({ limb, id: step.id, role: step.role });
-      handPositions[limb] = posOf(step.id);
-      const stillHeld = Object.entries(handPositions).some(([other, p]) => other !== limb && p.id === released.id);
-      if (!stillHeld) {
-        const footLimb = released.x <= centerX ? 'leftFoot' : 'rightFoot';
-        if (plannedFootPositions[footLimb].id !== released.id) {
-          steps.push({ limb: footLimb, id: released.id, role: 8 });
-          plannedFootPositions[footLimb] = released;
+    const initialIds = [leftStart.id, rightStart.id, leftFoot.id, rightFoot.id];
+    const initialContacts = Object.fromEntries(Object.keys(limbInfo).map((limb, i) => [limb, posOf(initialIds[i])]));
+    const initialPose = makePose(initialContacts, { x: centerX, y: centerY });
+    const handTargets = problem.plan.map((step) => ({ id: step.id, role: step.role }));
+    const eligibleFeet = [...new Set([...problem.holds.filter((h) => h.role === 8).map((h) => h.id), ...starts.map((p) => p.id)])];
+    const queue = [{ progress: 0, ids: initialIds, path: [], torso: initialPose.torso }];
+    const visited = new Set();
+    const stateKey = (state) => `${state.progress}:${state.ids.join(',')}`;
+    const limbNames = Object.keys(limbInfo);
+    const contactsFrom = (ids) => Object.fromEntries(limbNames.map((limb, i) => [limb, posOf(ids[i])]));
+    let head = 0;
+    while (head < queue.length && head < 12000) {
+      const state = queue[head++];
+      const key = stateKey(state);
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if (state.progress === handTargets.length) {
+        return { contacts: contactsFrom(initialIds), steps: state.path, torso: initialPose.torso };
+      }
+      const actions = [];
+      const target = handTargets[state.progress];
+      for (const limbIndex of [0, 1]) actions.push({ limbIndex, id: target.id, role: target.role, advance: 1 });
+      const reached = handTargets.slice(0, state.progress).map((step) => step.id);
+      for (const id of reached) {
+        for (const limbIndex of [0, 1]) {
+          if (holdMap.get(String(id)).y > holdMap.get(String(state.ids[limbIndex])).y + 4) actions.push({ limbIndex, id, role: 6, advance: 0 });
         }
       }
+      const footTargets = [...new Set([...eligibleFeet, ...reached])];
+      for (const limbIndex of [2, 3]) {
+        for (const id of footTargets) {
+          if (holdMap.get(String(id)).y > holdMap.get(String(state.ids[limbIndex])).y + 5) actions.push({ limbIndex, id, role: 8, advance: 0 });
+        }
+      }
+      for (const action of actions) {
+        if (state.ids[action.limbIndex] === action.id) continue;
+        const occupied = state.ids.filter((_, i) => i !== action.limbIndex).includes(action.id);
+        const handToHandShare = action.limbIndex < 2 && state.ids.slice(0, 2).includes(action.id);
+        if (occupied && !handToHandShare) continue;
+        const ids = [...state.ids];
+        ids[action.limbIndex] = action.id;
+        const contacts = contactsFrom(ids);
+        const pose = makePose(contacts, state.torso);
+        if (pose.maxViolation > 5) continue;
+        const next = {
+          progress: state.progress + action.advance,
+          ids,
+          path: [...state.path, { limb: limbNames[action.limbIndex], id: action.id, role: action.role }],
+          torso: pose.torso,
+        };
+        if (!visited.has(stateKey(next))) queue.push(next);
+      }
     }
-    if (finish) steps.push({ limb: limbFor(finish.limb), id: finish.id, role: 7 });
-    return { contacts, steps, torso: { x: centerX, y: centerY } };
+    return { contacts: initialContacts, steps: problem.plan.map((step) => ({ limb: limbFor(step.limb), id: step.id, role: step.role })), torso: initialPose.torso };
   }
   function solveTorso(contacts, previous) {
     let torso = { ...previous };
@@ -274,8 +323,17 @@
     const across = Math.sqrt(Math.max(0, upper * upper - along * along));
     return { x: root.x + ux * along - uy * across * side, y: root.y + uy * along + ux * across * side };
   }
-  function makePose(contacts, previousTorso) {
-    const solved = solveTorso(contacts, previousTorso), t = solved.torso;
+  function makePose(contacts, previousTorso, swing = null) {
+    const anchors = swing ? Object.fromEntries(Object.entries(contacts).filter(([limb]) => limb !== swing.limb)) : contacts;
+    const solved = solveTorso(anchors, previousTorso), t = solved.torso;
+    const poseContacts = { ...contacts };
+    if (swing) {
+      const info = limbInfo[swing.limb], root = { x: t.x + info.root[0], y: t.y + info.root[1] };
+      const desired = { x: swing.from.x + (swing.target.x - swing.from.x) * swing.progress, y: swing.from.y + (swing.target.y - swing.from.y) * swing.progress };
+      const dx = desired.x - root.x, dy = desired.y - root.y, d = Math.max(0.001, Math.hypot(dx, dy));
+      const safeDistance = Math.min(info.upper + info.lower - 1, Math.max(Math.abs(info.upper - info.lower) + 1, d));
+      poseContacts[swing.limb] = { x: root.x + dx / d * safeDistance, y: root.y + dy / d * safeDistance, id: swing.target.id };
+    }
     const points = {
       pelvis: t,
       neck: { x: t.x, y: t.y + 19 },
@@ -285,7 +343,7 @@
       const info = limbInfo[limb], side = limb.startsWith('left') ? 'left' : 'right';
       const isArm = limb.endsWith('Hand');
       const root = { x: t.x + info.root[0], y: t.y + info.root[1] };
-      const end = contacts[limb];
+      const end = poseContacts[limb];
       const joint = twoBone(root, end, info.upper, info.lower, info.side);
       if (isArm) {
         points[`${side}Shoulder`] = root;
@@ -309,6 +367,8 @@
     $('beta-status').textContent = 'PLANNING CONTACTS';
     window.setTimeout(() => {
       const { contacts, steps, torso: initialTorso } = contactSequence(currentProblem);
+      const list = $('sequence-list');
+      list.replaceChildren(...steps.map((step, i) => sequenceItem(i + 1, step.id, step.limb.replace('Hand', ' hand').replace('Foot', ' foot'), step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
       const current = { ...contacts };
       let pose = makePose(current, initialTorso);
       let maxViolation = pose.maxViolation;
@@ -328,12 +388,12 @@
         const step = steps[stepIndex];
         const from = current[step.limb], target = posOf(step.id);
         const progress = Math.min(1, (frameIndex + 1) / framesPerMove);
-        const movingContacts = { ...current, [step.limb]: { x: from.x + (target.x - from.x) * progress, y: from.y + (target.y - from.y) * progress, id: target.id } };
+        pose = makePose(current, pose.torso, { limb: step.limb, from, target, progress });
         for (const limb of Object.keys(current)) {
           if (limb === step.limb) continue;
-          maxContactDrift = Math.max(maxContactDrift, Math.hypot(movingContacts[limb].x - current[limb].x, movingContacts[limb].y - current[limb].y));
+          const endpoint = pose.points[limb];
+          maxContactDrift = Math.max(maxContactDrift, Math.hypot(endpoint.x - current[limb].x, endpoint.y - current[limb].y));
         }
-        pose = makePose(movingContacts, pose.torso);
         maxViolation = Math.max(maxViolation, pose.maxViolation);
         $('beta-status').textContent = `MOVING ${step.limb.toUpperCase()} · ${stepIndex + 1}/${steps.length}`;
         const highlighted = currentProblem.plan.findIndex((p) => p.id === step.id);
@@ -341,6 +401,8 @@
         frameIndex++;
         if (frameIndex >= framesPerMove) {
           current[step.limb] = target;
+          pose = makePose(current, pose.torso);
+          maxViolation = Math.max(maxViolation, pose.maxViolation);
           stepIndex++;
           frameIndex = 0;
         }

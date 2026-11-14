@@ -26,6 +26,6 @@ The `.github/workflows/pages.yml` workflow builds the app and deploys it to GitH
 
 ## Climb names and beta animation
 
-The name entered in the app is the route title and a deterministic seed for selecting from the prepared grade-conditioned model samples. The bundled BoardLib route rows do not contain climb names, so name text does not have learned semantic meaning yet. Retraining on a dataset with route names would be needed for text-guided holds.
+The name entered in the app is the route title and a deterministic seed for selecting from the prepared grade-conditioned model samples. The browser avoids repeats until it has used the selected grade’s prepared pool. The bundled BoardLib route rows do not contain climb names, so name text does not have learned semantic meaning yet. Retraining on a dataset with route names would be needed for text-guided holds.
 
-“Reveal beta animation” adds a simple two-dimensional climber over the authentic TB2 Mirror board image. It moves through the hand plan and selected foot contacts, solves two-segment arm and leg poses, and keeps the other three limb contacts fixed during each move. The feasibility badge reports joint reach limits and contact drift; this model remains a board-plane visualization, not a full-body physics simulation.
+“Reveal beta animation” searches a contact sequence through the route’s hand and foot holds. It draws a two-dimensional climber over the authentic TB2 Mirror board image, solves two-segment arm and leg poses, and keeps planted contacts fixed while the moving limb swings. The feasibility badge reports joint reach limits and contact drift; this model remains a board-plane visualization, not a full-body physics simulation.
