@@ -1,6 +1,6 @@
 /* On-demand TB2 route variants seeded from well-rated community climbs. */
 (function attach(root, factory) {
-  const api = factory();
+  const api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.ClimbGenRouteGenerator = api;
 })(typeof globalThis === 'object' ? globalThis : this, (root) => {
