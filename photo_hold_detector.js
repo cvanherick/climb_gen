@@ -123,6 +123,98 @@
     return { labels, centers };
   }
 
+  function wallForegroundLabels(lab, width, height, colorLabels, clusters, wallMask, threshold = 18) {
+    // Treat the dominant wall appearance as background and segment anything
+    // with a clear color-distance change from it. This keeps one hold's many
+    // shadows/highlights in a single foreground mask instead of producing a
+    // separate proposal for every global color cluster.
+    const counts = new Uint32Array(clusters.length);
+    const sums = Array.from({ length: clusters.length }, () => [0, 0, 0]);
+    for (let pixel = 0; pixel < colorLabels.length; pixel++) {
+      if (wallMask && !wallMask[pixel]) continue;
+      const cluster = colorLabels[pixel], k = pixel * 3;
+      counts[cluster]++;
+      sums[cluster][0] += lab[k]; sums[cluster][1] += lab[k + 1]; sums[cluster][2] += lab[k + 2];
+    }
+    const order = [...Array(clusters.length).keys()].filter((index) => counts[index]).sort((a, b) => counts[b] - counts[a]);
+    const wallPixels = order.reduce((sum, index) => sum + counts[index], 0);
+    const background = [];
+    let covered = 0;
+    for (const index of order) {
+      const center = sums[index].map((value) => value / counts[index]);
+      background.push(center);
+      covered += counts[index];
+      if (covered / Math.max(wallPixels, 1) >= 0.72 || background.length >= 4) break;
+    }
+
+    const count = width * height;
+    const labels = new Uint8Array(count);
+    let bgL = 0, bgA = 0, bgB = 0, bgCount = 0, fgL = 0, fgA = 0, fgB = 0, fgCount = 0;
+    const thresholdSquared = threshold * threshold;
+    for (let pixel = 0; pixel < count; pixel++) {
+      if (wallMask && !wallMask[pixel]) continue;
+      const k = pixel * 3;
+      let nearest = Infinity;
+      for (const center of background) {
+        const dl = lab[k] - center[0], da = lab[k + 1] - center[1], db = lab[k + 2] - center[2];
+        const distance = dl * dl + da * da + db * db;
+        if (distance < nearest) nearest = distance;
+      }
+      if (nearest >= thresholdSquared) {
+        labels[pixel] = 1;
+        fgL += lab[k]; fgA += lab[k + 1]; fgB += lab[k + 2]; fgCount++;
+      } else {
+        bgL += lab[k]; bgA += lab[k + 1]; bgB += lab[k + 2]; bgCount++;
+      }
+    }
+
+    // Close one-pixel gaps caused by hold texture and bolt holes while keeping
+    // adjacent objects separate at this scan resolution.
+    const dilated = new Uint8Array(count);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const pixel = y * width + x;
+        if (wallMask && !wallMask[pixel]) continue;
+        for (let dy = -1; dy <= 1 && !dilated[pixel]; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= height) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= width) continue;
+            const neighbor = yy * width + xx;
+            if ((!wallMask || wallMask[neighbor]) && labels[neighbor]) { dilated[pixel] = 1; break; }
+          }
+        }
+      }
+    }
+    const closed = labels.slice();
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const pixel = y * width + x;
+        if (wallMask && !wallMask[pixel]) { closed[pixel] = 0; continue; }
+        let allForeground = true;
+        for (let dy = -1; dy <= 1 && allForeground; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= height) { allForeground = false; break; }
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= width) { allForeground = false; break; }
+            const neighbor = yy * width + xx;
+            if ((!wallMask || wallMask[neighbor]) && !dilated[neighbor]) { allForeground = false; break; }
+          }
+        }
+        if (allForeground) closed[pixel] = 1;
+      }
+    }
+    return {
+      labels: closed,
+      centers: [
+        [bgL / Math.max(bgCount, 1), bgA / Math.max(bgCount, 1), bgB / Math.max(bgCount, 1)],
+        [fgL / Math.max(fgCount, 1), fgA / Math.max(fgCount, 1), fgB / Math.max(fgCount, 1)],
+      ],
+    };
+  }
+
   function smoothLabels(labels, width, height, clusters) {
     // A small majority filter removes isolated sensor/texture pixels before
     // component extraction. Keep ambiguous edges unchanged so nearby holds
@@ -261,7 +353,8 @@
       const cluster = labels[start];
       let top = 0, area = 0, perimeter = 0;
       let minX = width, maxX = -1, minY = height, maxY = -1, touchesWallEdge = false;
-      let sumX = 0, sumY = 0, sumRingL = 0, sumRingA = 0, sumRingB = 0, ringCount = 0, sumColorVariance = 0;
+      let sumX = 0, sumY = 0, sumL = 0, sumA = 0, sumB = 0;
+      let sumRingL = 0, sumRingA = 0, sumRingB = 0, ringCount = 0;
       const boundary = [];
       stack[top++] = start;
 
@@ -269,7 +362,8 @@
         const pixel = stack[--top];
         const x = pixel % width, y = (pixel / width) | 0;
         area++; sumX += x; sumY += y;
-        sumColorVariance += distanceSquared(lab, pixel, centers[cluster]);
+        const colorOffset = pixel * 3;
+        sumL += lab[colorOffset]; sumA += lab[colorOffset + 1]; sumB += lab[colorOffset + 2];
         if (x < minX) minX = x; if (x > maxX) maxX = x;
         if (y < minY) minY = y; if (y > maxY) maxY = y;
         // Inline four connected-neighbor checks. This runs once per pixel, so
@@ -311,8 +405,10 @@
       const aspect = boxWidth / boxHeight;
       const fill = area / boxArea;
       if (aspect < 0.22 || aspect > 4.2 || fill < 0.11) continue;
+      const center = [sumL / area, sumA / area, sumB / area];
+      let sumColorVariance = 0;
+      for (const [px, py] of boundary) sumColorVariance += distanceSquared(lab, py * width + px, center);
       const touchesEdge = touchesWallEdge || minX === 0 || minY === 0 || maxX === width - 1 || maxY === height - 1;
-      const center = centers[cluster];
       let contrast = 0;
       if (ringCount) {
         const dl = center[0] - sumRingL / ringCount;
@@ -326,7 +422,7 @@
       const sizeScore = clamp(1 - Math.abs(Math.log(Math.max(sizeRatio, 1e-7)) - Math.log(0.0012)) / 4.5, 0, 1);
       const contrastScore = clamp(contrast / 38, 0, 1);
       const fillScore = clamp(fill / 0.7, 0, 1);
-      const colorConsistency = clamp(1 - Math.sqrt(sumColorVariance / area) / 36, 0, 1);
+      const colorConsistency = clamp(1 - Math.sqrt(sumColorVariance / Math.max(1, boundary.length)) / 36, 0, 1);
       const borderPenalty = touchesEdge ? 0.22 : 0;
       const confidence = clamp(0.4 * contrastScore + 0.2 * fillScore + 0.13 * circularity + 0.12 * sizeScore + 0.15 * colorConsistency - borderPenalty, 0, 0.98);
       if (confidence < 0.3) continue;
@@ -379,10 +475,27 @@
     const wallMask = makeWallMask(width, height, options.wallPolygon);
     const clustered = fitColorClusters(lab, width, height, options.clusters ?? 12);
     const colorLabels = smoothLabels(clustered.labels, width, height, clustered.centers.length);
-    const colorCandidates = componentCandidates({ width, height, lab, labels: colorLabels, centers: clustered.centers, wallMask });
-    const contrast = labelsFromLocalContrast(lab, width, height, options.localContrastThreshold ?? 16);
-    const contrastCandidates = componentCandidates({ width, height, lab, labels: contrast.labels, centers: contrast.centers, wallMask });
-    const raw = [...colorCandidates, ...contrastCandidates].filter((candidate) => candidate.confidence >= minConfidence);
+    const foreground = wallForegroundLabels(
+      lab,
+      width,
+      height,
+      colorLabels,
+      clustered.centers,
+      wallMask,
+      options.wallContrastThreshold ?? 20,
+    );
+    // Work from a single board-relative foreground mask. The prior approach
+    // proposed one object per color/lighting fragment, which caused the
+    // familiar explosion of tiny outlines on textured or shadowed holds.
+    const foregroundCandidates = componentCandidates({
+      width,
+      height,
+      lab,
+      labels: foreground.labels,
+      centers: foreground.centers,
+      wallMask,
+    });
+    const raw = foregroundCandidates.filter((candidate) => candidate.confidence >= minConfidence);
     raw.sort((a, b) => b.confidence - a.confidence || b.contrast - a.contrast);
     const kept = [];
     for (const candidate of raw) {
@@ -390,7 +503,7 @@
       kept.push({ ...candidate, confidence: Math.round(candidate.confidence * 1000) / 1000 });
       if (kept.length >= maxCandidates) break;
     }
-    return { candidates: kept, width, height, method: 'local contrast + color regions', note: 'Auto marks are proposals. Review close, shadowed, and same-colored holds.' };
+    return { candidates: kept, width, height, method: 'wall-background segmentation', note: 'Auto marks are proposals. Review close, shadowed, and same-colored holds.' };
   }
 
   return { detect };
