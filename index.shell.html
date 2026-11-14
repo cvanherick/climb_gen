@@ -19,8 +19,9 @@
 
       <main class="page">
         <section class="intro-row">
-          <div><p class="eyebrow">PROBLEM GENERATOR <span>01</span></p><h1>Find your next<br /><em>sequence.</em></h1><p class="intro-copy">Choose a grade. Generate a new 40° problem.</p></div>
+          <div><p class="eyebrow">PROBLEM GENERATOR <span>01</span></p><h1>Find your next<br /><em>sequence.</em></h1><p class="intro-copy">Name it, choose a grade, and generate a 40° problem.</p></div>
           <div class="intro-controls">
+            <label class="name-control" for="climb-name"><span>CLIMB NAME</span><input id="climb-name" type="text" maxlength="32" placeholder="e.g. Moonshot" autocomplete="off" aria-label="Climb name" /></label>
             <label class="grade-control" for="grade-select"><span>TARGET GRADE</span><select id="grade-select" aria-label="Target climbing grade"><option value="any">Any</option><option>V0</option><option>V1</option><option>V2</option><option>V3</option><option>V4</option><option selected>V5</option><option>V6</option><option>V7</option><option>V8</option><option>V9</option><option>V10</option><option>V11</option></select></label>
             <button id="generate-button" class="generate-button" type="button"><span class="generate-icon">✳</span><span>Generate problem</span><span class="button-arrow">↗</span></button>
           </div>
@@ -44,6 +45,7 @@
             <div class="result-stats"><div><span>HOLDS</span><b id="hold-count">—</b></div><div><span>MOVES</span><b id="move-count">—</b></div><div><span>DATA POOL</span><b id="data-count">3,027</b></div></div>
             <div class="sequence-heading"><p class="eyebrow">SUGGESTED BETA</p><span id="beta-status">WAITING</span></div>
             <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">A reach-checked hand sequence appears here.</li></ol>
+            <button id="beta-button" class="beta-button" type="button" hidden>Reveal beta animation <span>▶</span></button>
             <div class="model-note"><span class="note-mark">⌁</span><p>Movement preview uses a simple 2D reach model. The board image and hold positions come from TB2 Mirror data.</p></div>
             <div class="result-footer"><i></i> COMMUNITY DATA · 40° <span>BoardLib</span></div>
           </aside>

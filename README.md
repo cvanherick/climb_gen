@@ -23,3 +23,9 @@ The reach check is a simple 2D distance approximation. It does not model grip fo
 ## Deploy with GitHub Pages
 
 The `.github/workflows/pages.yml` workflow builds the app and deploys it to GitHub Pages whenever a change is pushed to `main`. It can also be run manually from the repository’s Actions tab. `scripts/build_pages.py` serves the app code, TB2 data, and board images as separate same-origin files. Use `python3 -m http.server` to preview that build locally; `scripts/build_standalone.py` makes offline copies instead.
+
+## Climb names and beta animation
+
+The name entered in the app is the route title and a deterministic seed for selecting from the prepared grade-conditioned model samples. The bundled BoardLib route rows do not contain climb names, so name text does not have learned semantic meaning yet. Retraining on a dataset with route names would be needed for text-guided holds.
+
+“Reveal beta animation” adds a simple two-dimensional climber over the authentic TB2 Mirror board image. It moves through the hand plan and selected foot contacts, solves two-segment arm and leg poses, and keeps the other three limb contacts fixed during each move. The feasibility badge reports joint reach limits and contact drift; this model remains a board-plane visualization, not a full-body physics simulation.
