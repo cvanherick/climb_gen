@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111b1d" />
+    <title>ClimbGen — TB2 problem generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- INLINE_STYLES -->
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="ClimbGen"><span class="brand-mark"><i></i><i></i><i></i></span><span>climb<span>gen</span></span></a>
+        <div class="board-tag"><span class="tag-dot"></span> TENSION BOARD 2 <b>/</b> MIRROR <strong>40°</strong></div>
+      </header>
+
+      <main class="page">
+        <section class="intro-row">
+          <div><p class="eyebrow">PROBLEM GENERATOR <span>01</span></p><h1>Find your next<br /><em>sequence.</em></h1><p class="intro-copy">Fresh routes sampled from real TB2 40° community patterns.</p></div>
+          <button id="generate-button" class="generate-button" type="button"><span class="generate-icon">✳</span><span>Generate problem</span><span class="button-arrow">↗</span></button>
+        </section>
+
+        <section class="content-grid">
+          <div class="board-card">
+            <div class="card-heading"><div><p class="eyebrow">HOLD MAP</p><h2>12 × 12 · Mirror layout</h2></div><span id="board-status" class="board-status">READY</span></div>
+            <div class="board-area">
+              <svg id="board-svg" viewBox="0 0 600 620" role="img" aria-label="Authentic TB2 Mirror hold layout with generated route highlighted"></svg>
+              <div id="board-hint" class="board-hint"><span>✳</span> Generate a problem to light the holds</div>
+              <div class="board-angle">40° <i>FIXED ANGLE</i></div>
+            </div>
+            <div class="board-caption"><span><i class="legend-hold"></i> Actual TB2 hold set</span><span><i class="legend-route"></i> Generated problem</span><span>Layout data · 12 × 12</span></div>
+          </div>
+
+          <aside class="result-card">
+            <p class="eyebrow">ROUTE READOUT</p>
+            <div class="result-top"><div><h2 id="route-title">Ready to climb?</h2><p class="route-byline">ClimbGen <span>·</span> New problem</p></div><span class="angle-chip">40°</span></div>
+            <p class="result-copy" id="route-copy">One button. One fixed angle. A new set of holds from the TB2 dataset.</p>
+            <div class="result-stats"><div><span>HOLDS</span><b id="hold-count">—</b></div><div><span>MOVES</span><b id="move-count">—</b></div><div><span>DATA POOL</span><b id="data-count">3,027</b></div></div>
+            <div class="sequence-heading"><p class="eyebrow">SUGGESTED BETA</p><span id="beta-status">WAITING</span></div>
+            <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">A reach-checked hand sequence appears here.</li></ol>
+            <div class="model-note"><span class="note-mark">⌁</span><p>Movement preview uses a simple 2D reach model. The board image and hold positions come from TB2 Mirror data.</p></div>
+            <div class="result-footer"><i></i> COMMUNITY DATA · 40° <span>BoardLib</span></div>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <!-- INLINE_DATA -->
+    <!-- INLINE_APP -->
+  </body>
+</html>
