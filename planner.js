@@ -14,7 +14,7 @@
     const maxExpanded = options.maxExpanded ?? 500;
     const beamWidth = options.beamWidth ?? 36;
     const maxDepth = options.maxDepth ?? 30;
-    const weights = { reach: 0.28, stability: 0.12, effort: 1, awkwardness: 1 / 90, movement: 0.65, repeatLimb: 0.18, ...(options.weights || {}) };
+    const weights = { reach: 0.28, stability: 0.12, effort: 1, awkwardness: 1 / 90, movement: 0.65, repeatLimb: 0.18, crossThrough: 0.28, highFoot: 0.16, ...(options.weights || {}) };
     const lookup = (id) => placements instanceof Map ? placements.get(String(id)) || placements.get(id) : placements[String(id)];
     const holds = problem.holds.map((h) => ({ ...h, position: lookup(h.id) })).filter((h) => h.position);
     const starts = holds.filter((h) => h.role === 5).sort((a, b) => a.position.x - b.position.x);
@@ -90,14 +90,23 @@
             const movement = Math.hypot(targetPosition.x - oldPosition.x, targetPosition.y - oldPosition.y);
             const torsoMove = Math.hypot(pose.torso.x - current.pose.torso.x, pose.torso.y - current.pose.torso.y);
             const crossesBody = (limb.startsWith('left') && targetPosition.x > pose.torso.x + 8) || (limb.startsWith('right') && targetPosition.x < pose.torso.x - 8);
+            const isHighFoot = !isHand && targetPosition.y > pose.torso.y + 12;
             const movementType = canMatch ? (isHand ? 'hand match' : 'foot swap')
-              : !isHand && targetPosition.y > pose.torso.y + 12 ? 'high foot'
+              : isHighFoot ? 'high foot'
                 : crossesBody ? 'cross-through' : !isHand ? 'foot reposition' : 'reach';
             const repeatsLimb = current.path.at(-1)?.limb === limb ? weights.repeatLimb : 0;
+            // Prefer movement that keeps limbs on their own side and feet low
+            // when alternatives reach the same route holds. These are soft
+            // style costs: hard constraints still come from IK reach checks.
+            const crossPenalty = crossesBody ? weights.crossThrough : 0;
+            const highFootPenalty = isHighFoot
+              ? weights.highFoot * Math.min(2, (targetPosition.y - pose.torso.y - 12) / 20)
+              : 0;
+            const movementQualityPenalty = crossPenalty + highFootPenalty;
             const next = {
               contacts, initialContacts: current.initialContacts, visited, pose, depth: depth + 1,
-              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + repeatsLimb,
-              path: [...current.path, { limb, label: labels[limb], movementType, id: target.id, role: target.role, contacts, pose, diagnostics: diag }],
+              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + repeatsLimb + movementQualityPenalty,
+              path: [...current.path, { limb, label: labels[limb], movementType, movementQualityPenalty, id: target.id, role: target.role, contacts, pose, diagnostics: diag }],
             };
             const key = keyOf(next), previousCost = seen.get(key);
             if (previousCost != null && previousCost <= next.g) continue;

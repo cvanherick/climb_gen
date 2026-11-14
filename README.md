@@ -14,7 +14,7 @@ The database and placement images were downloaded using BoardLib’s documented 
 
 ## On-demand climb generation
 
-The browser now generates a new climb variant on every click rather than cycling through the 120-row prepared pool. `route_generator.js` selects a well-rated route template for the requested grade, keeps every start hold in the board's lower third (`y ≤ 44`), changes one or two hand or foot contacts using TB2 community hold frequencies, then checks upward progress, reachability, vertical spread, and isolated holds. Before displaying a route, the app also requires the four-limb beta planner to find a contact sequence; it retries other variants when a candidate fails. Quality-checked DDPM samples can also seed variants. It avoids repeats during the current page session. The possible combinations are very large but finite because the board has a fixed hold set.
+The browser now generates a new climb variant on every click rather than cycling through the 120-row prepared pool. `route_generator.js` selects a well-rated route template for the requested grade, keeps every start hold in the board's lower third (`y ≤ 44`), changes one to three hand or foot contacts using TB2 community hold frequencies, then checks upward progress, reachability, vertical spread, and isolated holds. Before displaying a route, the app also requires the four-limb beta planner to find a contact sequence; it retries other variants when a candidate fails. Quality-checked DDPM samples can also seed variants. It avoids repeats during the current page session. The possible combinations are very large but finite because the board has a fixed hold set.
 
 `scripts/train_diffusion.py` remains an offline experiment for the grade-conditioned DDPM. It uses PyTorch and NumPy, learns role-grid patterns, and saves a checkpoint and prepared candidates; the browser does not need PyTorch or a backend. Several DDPM candidates failed simple route-shape checks in the current bundle, so only screened samples may seed the on-demand generator.
 
@@ -34,6 +34,12 @@ The name entered in the app is the route title and one input to a per-session ra
 
 The result panel separates modeled kinematic checks from the approximate support score and states that physical feasibility is unverified. Debug details are hidden by default; open “Planner diagnostics” to view explored states, rejected transitions, timing, weighted cost, center of mass, and support hull. Playback includes pause, replay, and speed controls.
 
+## Build a climb from a wall photo
+
+The experimental photo builder keeps an uploaded wall image in the browser session. The user can mark the wall's four corners to rectify camera perspective, mark candidate holds, select a start, and choose among ranked next-hold options, including a possible finish. Suggestions use the corrected hold coordinates and TB2 community-route movement geometry as a prior. A single image does not establish the physical wall angle or scale; angle input is optional and user supplied. This is not photo-conditioned diffusion, automatic hold detection, or a reachability/safety check. `photo_suggestions.js` is loaded by both Pages and standalone builds.
+
+There are public image datasets that could seed a hold detector, but their rights need to be checked at the image-source level. The [Crimps Bouldering Holds dataset](https://universe.roboflow.com/crimps/bouldering-holds-rpoux) states CC BY 4.0 for its 427-image version; retain attribution and confirm export/model redistribution terms before bundling a trained model. [ClimbInst](https://huggingface.co/datasets/ClimbVision/ClimbInst) has more annotations, but defers to the licenses of its constituent image sources. Do not treat arbitrary web images or videos as training data simply because they are publicly viewable; [YouTube's developer policies](https://developers.google.com/youtube/terms/developer-policies/) prohibit scraping and downloading or storing audiovisual copies without prior written approval.
+
 ### Reproducible evaluation
 
 Run `node --test tests/planner.test.js` for IK, deterministic route, and explicit failure tests. Run `node scripts/evaluate_planner.js` to benchmark a deterministic stratified sample (indices 0, 11, 22, …, 111) spanning V0–V11. On the current local run, the planner found a contact plan for 11 of 12 routes, with an average of 8.7 contact actions and 29 foot moves across those 11 plans. Search time ranged from a few milliseconds to 1.57 seconds on this machine. One case returned no plan within the configured model/search limits.
@@ -47,3 +53,5 @@ This remains a 2D geometric animation. The support-polygon score does not estima
 ### Motion-data direction
 
 [ClimbingCap / AscendMotion](https://openaccess.thecvf.com/content/CVPR2025/html/Yan_ClimbingCap_Multi-Modal_Dataset_and_Method_for_Rock_Climbing_in_World_CVPR_2025_paper.html) is a possible future source for a learned movement prior. It is not integrated here; the next useful research milestone is to hand-label plausible four-limb sequences for a small TB2 route set and compare the geometric planner against those annotations before adding a learned motion model.
+
+`scripts/prepare_motion_data.py` is a provenance-gated adapter for owner-permitted pose/contact annotations. It requires an explicit training permission flag and records dataset/license provenance. See [the motion-data schema](docs/motion-data-schema.md). It does not download videos, infer contacts, or establish dataset rights.

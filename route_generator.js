@@ -101,7 +101,12 @@
         const holds = template.holds.map(([id, role]) => [Number(id), Number(role)]);
         const mutable = holds.map((pair, index) => ({ pair, index })).filter(({ pair }) => pair[1] === roles.hand || pair[1] === roles.foot);
         if (!mutable.length) continue;
-        const changeCount = rng() < 0.7 ? 1 : 2;
+        // Change several contacts so successive variants don't feel like the
+        // same community route with a single hold swapped. Keep a meaningful
+        // share of one-contact edits for grades where the planner has fewer
+        // feasible alternatives.
+        const changeRoll = rng();
+        const changeCount = changeRoll < 0.2 ? 1 : changeRoll < 0.72 ? 2 : 3;
         const chosen = [];
         while (chosen.length < Math.min(changeCount, mutable.length)) {
           const item = mutable[Math.floor(rng() * mutable.length)];
