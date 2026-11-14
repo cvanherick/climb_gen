@@ -19,7 +19,7 @@
 
       <main class="page">
         <section class="intro-row">
-          <div><p class="eyebrow">PROBLEM GENERATOR <span>01</span></p><h1>Find your next<br /><em>sequence.</em></h1><p class="intro-copy">The name seeds route selection. Generate a new 40° problem.</p></div>
+          <div><p class="eyebrow">PROBLEM GENERATOR <span>01</span></p><h1>Find your next<br /><em>sequence.</em></h1><p class="intro-copy">Generate fresh variations from quality-rated TB2 climbs, on demand.</p></div>
           <div class="intro-controls">
             <label class="name-control" for="climb-name"><span>CLIMB NAME</span><input id="climb-name" type="text" maxlength="32" placeholder="e.g. Moonshot" autocomplete="off" aria-label="Climb name" /></label>
             <label class="grade-control" for="grade-select"><span>TARGET GRADE</span><select id="grade-select" aria-label="Target climbing grade"><option value="any">Any</option><option>V0</option><option>V1</option><option>V2</option><option>V3</option><option>V4</option><option selected>V5</option><option>V6</option><option>V7</option><option>V8</option><option>V9</option><option>V10</option><option>V11</option></select></label>
@@ -44,15 +44,22 @@
             <p class="result-copy" id="route-copy">One button. One fixed angle. A new set of holds from the TB2 dataset.</p>
             <div class="result-stats"><div><span>HOLDS</span><b id="hold-count">—</b></div><div><span>MOVES</span><b id="move-count">—</b></div><div><span>DATA POOL</span><b id="data-count">3,027</b></div></div>
             <div class="sequence-heading"><p class="eyebrow">SUGGESTED BETA</p><span id="beta-status">WAITING</span></div>
-            <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">A reach-checked hand sequence appears here.</li></ol>
+            <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">A four-limb contact search appears here.</li></ol>
             <button id="beta-button" class="beta-button" type="button" hidden>Reveal beta animation <span>▶</span></button>
-            <div class="model-note"><span class="note-mark">⌁</span><p>Movement preview uses a simple 2D reach model. The board image and hold positions come from TB2 Mirror data.</p></div>
+            <div id="playback-controls" class="playback-controls" hidden>
+              <button id="playback-toggle" type="button">Pause</button>
+              <button id="playback-replay" type="button">Replay</button>
+              <label>Speed <select id="playback-speed"><option value="1">1×</option><option value="0.7">0.7×</option><option value="1.4">1.4×</option></select></label>
+            </div>
+            <details id="planner-debug" class="planner-debug" hidden><summary>Planner diagnostics</summary><pre id="planner-diagnostics"></pre></details>
+            <div class="model-note"><span class="note-mark">⌁</span><p>Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.</p></div>
             <div class="result-footer"><i></i> COMMUNITY DATA · 40° <span>BoardLib</span></div>
           </aside>
         </section>
       </main>
     </div>
     <!-- INLINE_DATA -->
+    <!-- INLINE_MODELS -->
     <!-- INLINE_APP -->
   </body>
 </html>

@@ -7,6 +7,8 @@ template = (ROOT / "index.shell.html").read_text()
 styles = (ROOT / "styles.css").read_text()
 dataset = (ROOT / "data/tb2-mirror-40.js").read_text()
 app = (ROOT / "app.js").read_text()
+models = (ROOT / "ik.js").read_text() + "\n" + (ROOT / "planner.js").read_text()
+route_generator = (ROOT / "route_generator.js").read_text()
 image_data = {
     "wood": "data:image/png;base64," + base64.b64encode((ROOT / "assets/tb2-12x12-mirror-wood.png").read_bytes()).decode("ascii"),
     "plastic": "data:image/png;base64," + base64.b64encode((ROOT / "assets/tb2-12x12-mirror-plastic.png").read_bytes()).decode("ascii"),
@@ -15,6 +17,7 @@ image_data = {
 replacements = {
     "<!-- INLINE_STYLES -->": f"<style>\n{styles}\n</style>",
     "<!-- INLINE_DATA -->": f"<script>\n{dataset}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
+    "<!-- INLINE_MODELS -->": f"<script>\n{route_generator}\n{models}\n</script>",
     "<!-- INLINE_APP -->": f"<script>\n{app}\n</script>",
 }
 for marker, content in replacements.items():

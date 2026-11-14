@@ -8,8 +8,7 @@
   };
   const board = { left: -68, right: 68, bottom: 0, top: 144, x: 20, y: 13.26, width: 560, height: 593.48 };
   const holdMap = new Map();
-  let dataset, generatedCount = 0, animationTimer, betaTimer, generating = false, currentProblem = null;
-  const usedCandidates = new Map();
+  let dataset, routeGenerator, generatedCount = 0, betaFrame = 0, betaPaused = false, betaPlaybackIndex = 0, betaResult = null, currentPose = null, generating = false, currentProblem = null;
 
   function point(x, y) {
     return {
@@ -39,13 +38,33 @@
         ring.append(title);
         svg.append(ring);
       });
-      if (activeStep >= 0 && route.plan[activeStep]) {
-        const hold = holdMap.get(String(route.plan[activeStep].id));
+      if (activeStep >= 0 && route.betaSteps?.[activeStep]) {
+        const hold = holdMap.get(String(route.betaSteps[activeStep].id));
         const p = point(hold.x, hold.y);
         svg.append(svgEl('circle', { cx: p.x, cy: p.y, r: 16, class: 'active-ring' }));
       }
     }
-    if (figure) drawClimber(figure);
+    if (figure) {
+      drawClimber(figure);
+      if (!$('planner-debug').hidden && $('planner-debug').open) drawPlannerOverlay(figure);
+    }
+  }
+  function drawPlannerOverlay(frame) {
+    const diagnostics = frame.diagnostics;
+    if (diagnostics?.supportHull?.length > 1) {
+      const points = diagnostics.supportHull.map((p) => { const q = point(p.x, p.y); return `${q.x},${q.y}`; }).join(' ');
+      svg.append(svgEl('polygon', { points, class: 'debug-support' }));
+    }
+    if (diagnostics?.centerOfMass) {
+      const p = point(diagnostics.centerOfMass.x, diagnostics.centerOfMass.y);
+      svg.append(svgEl('circle', { cx: p.x, cy: p.y, r: 5, class: 'debug-com' }));
+    }
+    for (const limb of ['leftHand', 'rightHand', 'leftFoot', 'rightFoot']) {
+      const anchor = frame.points[limb];
+      if (!anchor) continue;
+      const p = point(anchor.x, anchor.y);
+      svg.append(svgEl('circle', { cx: p.x, cy: p.y, r: 4, class: 'debug-contact' }));
+    }
   }
   function drawClimber(frame) {
     const line = (a, b, className = 'climber-limb') => {
@@ -69,110 +88,41 @@
     dot(p.pelvis, 4);
     dot(p.head, 4.5, 'climber-head');
   }
-  function keyFor(holds) {
-    return holds.map((h) => `${h[0]}r${h[1]}`).sort().join('|');
-  }
-  function distance(a, b) {
-    const ah = holdMap.get(String(a)), bh = holdMap.get(String(b));
-    return Math.hypot(ah.x - bh.x, ah.y - bh.y);
-  }
-  function planner(holds) {
-    const starts = holds.filter((h) => h.role === 5).map((h) => h.id).sort((a, b) => holdMap.get(String(a)).x - holdMap.get(String(b)).x);
-    const middle = holds.filter((h) => h.role === 6).map((h) => h.id);
-    const finishes = holds.filter((h) => h.role === 7).map((h) => h.id);
-    if (!starts.length || !middle.length || !finishes.length) return null;
-    const leftStart = starts[0], rightStart = starts.length > 1 ? starts[starts.length - 1] : starts[0];
-    const reachLimit = 43;
-    let best = null;
-    const visit = (left, right, remaining, path, cost, previousLimb) => {
-      if (!remaining.length) {
-        for (const finish of finishes) {
-          const options = [
-            { limb: 'L hand', d: distance(left, finish), side: 'left' },
-            { limb: 'R hand', d: distance(right, finish), side: 'right' },
-          ].filter((v) => v.d <= reachLimit).sort((a, b) => a.d - b.d);
-          for (const option of options) {
-            const total = cost + option.d + (option.side === previousLimb ? 5 : 0);
-            if (!best || total < best.cost) best = { cost: total, path: [...path, { id: finish, limb: option.limb, role: 7 }] };
-          }
-        }
-        return;
-      }
-      if (best && cost >= best.cost) return;
-      for (const id of remaining) {
-        const options = [
-          { limb: 'L hand', d: distance(left, id), side: 'left' },
-          { limb: 'R hand', d: distance(right, id), side: 'right' },
-        ].filter((v) => v.d <= reachLimit).sort((a, b) => a.d - b.d);
-        for (const option of options) {
-          const next = remaining.filter((x) => x !== id);
-          visit(option.side === 'left' ? id : left, option.side === 'right' ? id : right, next,
-            [...path, { id, limb: option.limb, role: 6 }], cost + option.d + (option.side === previousLimb ? 5 : 0), option.side);
-        }
-      }
-    };
-    visit(leftStart, rightStart, middle, [], 0, null);
-    return best?.path || null;
-  }
   function routeHolds(record) {
     return record.holds.map(([id, role]) => ({ id, role }));
   }
-  function hashName(value) {
-    let hash = 2166136261;
-    for (const char of value.normalize('NFKC').trim().toLowerCase()) {
-      hash ^= char.codePointAt(0);
-      hash = Math.imul(hash, 16777619);
-    }
-    return hash >>> 0;
-  }
   function sampleProblem() {
-    // Candidate generation and reach checking happen at build time. Keeping the
-    // click path to a single array lookup avoids a long-running planner freezing
-    // the page or leaving the Generate button stuck in its busy state.
     const targetGrade = $('grade-select').value;
-    const pool = targetGrade === 'any'
-      ? dataset.generated
-      : dataset.generated.filter((candidate) => candidate.source.grade === targetGrade);
-    if (!Array.isArray(pool) || pool.length === 0) throw new Error('No prepared TB2 problems are bundled');
     const typedName = $('climb-name').value.trim();
     const climbName = typedName || `Climb ${String(generatedCount + 1).padStart(2, '0')}`;
-    const seed = hashName(`${climbName}|${targetGrade}|${generatedCount}`);
-    const seen = usedCandidates.get(targetGrade) || new Set();
-    let candidate = null;
-    for (let offset = 0; offset < pool.length; offset++) {
-      const option = pool[(seed + offset) % pool.length];
-      const signature = keyFor(option.holds);
-      if (!seen.has(signature)) { candidate = option; seen.add(signature); break; }
-    }
-    if (!candidate) {
-      seen.clear();
-      candidate = pool[seed % pool.length];
-      seen.add(keyFor(candidate.holds));
-    }
-    usedCandidates.set(targetGrade, seen);
-    if (!Array.isArray(candidate.holds) || !Array.isArray(candidate.plan)) throw new Error('Prepared TB2 problem is invalid');
+    const candidate = routeGenerator.generate({ grade: targetGrade, name: climbName, sequence: generatedCount });
     return {
       holds: routeHolds(candidate),
-      plan: candidate.plan,
       source: candidate.source,
       changed: candidate.changed,
       name: climbName,
     };
   }
   function renderResult(problem) {
-    clearInterval(betaTimer);
+    cancelAnimationFrame(betaFrame);
     currentProblem = problem;
     generatedCount++;
     $('route-title').textContent = problem.name;
     $('route-grade').textContent = `40° · ≈${problem.source.grade}`;
-    $('route-copy').textContent = `${problem.holds.length} holds · ${problem.plan.length} moves · ${problem.source.grade}`;
+    const baseLabel = problem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${problem.source.templateId}`;
+    $('route-copy').textContent = `${problem.holds.length} holds · fresh ${problem.source.grade} variation · based on ${baseLabel}`;
     $('hold-count').textContent = problem.holds.length;
-    $('move-count').textContent = problem.plan.length;
+    $('move-count').textContent = '—';
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
     $('beta-status').textContent = 'BETA HIDDEN';
     $('beta-button').hidden = false;
     $('beta-button').disabled = false;
     $('beta-button').textContent = 'Reveal beta animation';
+    $('playback-controls').hidden = true;
+    $('planner-debug').hidden = true;
+    betaResult = null;
+    currentPose = null;
+    betaPlaybackIndex = 0;
     $('board-status').textContent = problem.changed ? 'GENERATED' : 'COMMUNITY ROUTE';
     $('board-status').classList.add('ready');
     $('board-hint').classList.add('hidden');
@@ -192,223 +142,87 @@
     li.innerHTML = `<span class="step-number">${number == null ? '·' : String(number).padStart(2, '0')}</span><i class="step-dot ${role}"></i><span class="step-hold">${hold.label} <small>#${id}</small></span><span class="step-limb">${label}</span>`;
     return li;
   }
-  function animatePlan(problem) {
-    clearInterval(animationTimer);
-    let current = 0;
-    const tick = () => {
-      const items = [...$('sequence-list').querySelectorAll('li[data-hold-id]')];
-      items.forEach((item) => item.classList.remove('active'));
-      if (current >= problem.plan.length) { drawBoard(problem); clearInterval(animationTimer); return; }
-      const item = [...$('sequence-list').querySelectorAll('li[data-hold-id]')].find((li) => Number(li.dataset.holdId) === problem.plan[current].id);
-      if (item) item.classList.add('active');
-      drawBoard(problem, current);
-      current++;
-    };
-    tick();
-    animationTimer = setInterval(tick, 650);
-  }
-  const limbInfo = {
-    leftHand: { root: [-7, 20], upper: 22, lower: 22, side: -1 },
-    rightHand: { root: [7, 20], upper: 22, lower: 22, side: 1 },
-    leftFoot: { root: [-6, 0], upper: 24, lower: 23, side: -1 },
-    rightFoot: { root: [6, 0], upper: 24, lower: 23, side: 1 },
-  };
-  const limbFor = (label) => label.startsWith('L') ? (label.includes('foot') ? 'leftFoot' : 'leftHand') : (label.includes('foot') ? 'rightFoot' : 'rightHand');
-  const posOf = (id) => {
-    const p = holdMap.get(String(id));
-    return { x: p.x, y: p.y, id };
-  };
-  function contactSequence(problem) {
-    const starts = problem.holds.filter((h) => h.role === 5).map((h) => posOf(h.id)).sort((a, b) => a.x - b.x);
-    const feet = problem.holds.filter((h) => h.role === 8).map((h) => posOf(h.id));
-    const leftStart = starts[0], rightStart = starts[starts.length - 1];
-    const centerX = (leftStart.x + rightStart.x) / 2;
-    const centerY = (leftStart.y + rightStart.y) / 2 - 18;
-    const orderedFeet = [...feet].sort((a, b) => Math.abs(a.y - (centerY - 4)) - Math.abs(b.y - (centerY - 4)));
-    const leftFoot = orderedFeet.find((p) => p.x <= centerX) || orderedFeet[0] || leftStart;
-    const rightFoot = orderedFeet.find((p) => p.x >= centerX && p.id !== leftFoot.id) || orderedFeet.find((p) => p.id !== leftFoot.id) || rightFootFallback();
-    function rightFootFallback() { return orderedFeet[0] || rightStart; }
-    const initialIds = [leftStart.id, rightStart.id, leftFoot.id, rightFoot.id];
-    const initialContacts = Object.fromEntries(Object.keys(limbInfo).map((limb, i) => [limb, posOf(initialIds[i])]));
-    const initialPose = makePose(initialContacts, { x: centerX, y: centerY });
-    const handTargets = problem.plan.map((step) => ({ id: step.id, role: step.role }));
-    const eligibleFeet = [...new Set([...problem.holds.filter((h) => h.role === 8).map((h) => h.id), ...starts.map((p) => p.id)])];
-    const queue = [{ progress: 0, ids: initialIds, path: [], torso: initialPose.torso }];
-    const visited = new Set();
-    const stateKey = (state) => `${state.progress}:${state.ids.join(',')}`;
-    const limbNames = Object.keys(limbInfo);
-    const contactsFrom = (ids) => Object.fromEntries(limbNames.map((limb, i) => [limb, posOf(ids[i])]));
-    let head = 0;
-    while (head < queue.length && head < 12000) {
-      const state = queue[head++];
-      const key = stateKey(state);
-      if (visited.has(key)) continue;
-      visited.add(key);
-      if (state.progress === handTargets.length) {
-        return { contacts: contactsFrom(initialIds), steps: state.path, torso: initialPose.torso };
-      }
-      const actions = [];
-      const target = handTargets[state.progress];
-      for (const limbIndex of [0, 1]) actions.push({ limbIndex, id: target.id, role: target.role, advance: 1 });
-      const reached = handTargets.slice(0, state.progress).map((step) => step.id);
-      for (const id of reached) {
-        for (const limbIndex of [0, 1]) {
-          if (holdMap.get(String(id)).y > holdMap.get(String(state.ids[limbIndex])).y + 4) actions.push({ limbIndex, id, role: 6, advance: 0 });
-        }
-      }
-      const footTargets = [...new Set([...eligibleFeet, ...reached])];
-      for (const limbIndex of [2, 3]) {
-        for (const id of footTargets) {
-          if (holdMap.get(String(id)).y > holdMap.get(String(state.ids[limbIndex])).y + 5) actions.push({ limbIndex, id, role: 8, advance: 0 });
-        }
-      }
-      for (const action of actions) {
-        if (state.ids[action.limbIndex] === action.id) continue;
-        const occupied = state.ids.filter((_, i) => i !== action.limbIndex).includes(action.id);
-        const handToHandShare = action.limbIndex < 2 && state.ids.slice(0, 2).includes(action.id);
-        if (occupied && !handToHandShare) continue;
-        const ids = [...state.ids];
-        ids[action.limbIndex] = action.id;
-        const contacts = contactsFrom(ids);
-        const pose = makePose(contacts, state.torso);
-        if (pose.maxViolation > 5) continue;
-        const next = {
-          progress: state.progress + action.advance,
-          ids,
-          path: [...state.path, { limb: limbNames[action.limbIndex], id: action.id, role: action.role }],
-          torso: pose.torso,
-        };
-        if (!visited.has(stateKey(next))) queue.push(next);
-      }
-    }
-    return { contacts: initialContacts, steps: problem.plan.map((step) => ({ limb: limbFor(step.limb), id: step.id, role: step.role })), torso: initialPose.torso };
-  }
-  function solveTorso(contacts, previous) {
-    let torso = { ...previous };
-    let maxViolation = 0;
-    for (let iteration = 0; iteration < 90; iteration++) {
-      let gx = 0, gy = 0;
-      maxViolation = 0;
-      for (const [limb, endpoint] of Object.entries(contacts)) {
-        const info = limbInfo[limb];
-        const root = { x: torso.x + info.root[0], y: torso.y + info.root[1] };
-        const dx = root.x - endpoint.x, dy = root.y - endpoint.y;
-        const d = Math.max(0.001, Math.hypot(dx, dy));
-        const min = Math.abs(info.upper - info.lower) + 1;
-        const max = info.upper + info.lower - 1;
-        const error = d < min ? d - min : d > max ? d - max : 0;
-        maxViolation = Math.max(maxViolation, Math.abs(error));
-        if (error) { gx += 8 * error * dx / d; gy += 8 * error * dy / d; }
-      }
-      gx += 0.12 * (torso.x - previous.x);
-      gy += 0.12 * (torso.y - previous.y);
-      torso.x -= Math.max(-3, Math.min(3, gx * 0.035));
-      torso.y -= Math.max(-3, Math.min(3, gy * 0.035));
-      torso.x = Math.max(-60, Math.min(60, torso.x));
-      torso.y = Math.max(3, Math.min(136, torso.y));
-    }
-    for (const [limb, endpoint] of Object.entries(contacts)) {
-      const info = limbInfo[limb], root = { x: torso.x + info.root[0], y: torso.y + info.root[1] };
-      const d = Math.hypot(root.x - endpoint.x, root.y - endpoint.y);
-      maxViolation = Math.max(maxViolation, Math.max(0, d - info.upper - info.lower + 1, Math.abs(info.upper - info.lower) + 1 - d));
-    }
-    return { torso, maxViolation };
-  }
-  function twoBone(root, target, upper, lower, side) {
-    const dx = target.x - root.x, dy = target.y - root.y;
-    const raw = Math.max(0.01, Math.hypot(dx, dy));
-    const d = Math.min(upper + lower - 0.05, Math.max(Math.abs(upper - lower) + 0.05, raw));
-    const ux = dx / raw, uy = dy / raw;
-    const along = (upper * upper + d * d - lower * lower) / (2 * d);
-    const across = Math.sqrt(Math.max(0, upper * upper - along * along));
-    return { x: root.x + ux * along - uy * across * side, y: root.y + uy * along + ux * across * side };
-  }
-  function makePose(contacts, previousTorso, swing = null) {
-    const anchors = swing ? Object.fromEntries(Object.entries(contacts).filter(([limb]) => limb !== swing.limb)) : contacts;
-    const solved = solveTorso(anchors, previousTorso), t = solved.torso;
-    const poseContacts = { ...contacts };
-    if (swing) {
-      const info = limbInfo[swing.limb], root = { x: t.x + info.root[0], y: t.y + info.root[1] };
-      const desired = { x: swing.from.x + (swing.target.x - swing.from.x) * swing.progress, y: swing.from.y + (swing.target.y - swing.from.y) * swing.progress };
-      const dx = desired.x - root.x, dy = desired.y - root.y, d = Math.max(0.001, Math.hypot(dx, dy));
-      const safeDistance = Math.min(info.upper + info.lower - 1, Math.max(Math.abs(info.upper - info.lower) + 1, d));
-      poseContacts[swing.limb] = { x: root.x + dx / d * safeDistance, y: root.y + dy / d * safeDistance, id: swing.target.id };
-    }
-    const points = {
-      pelvis: t,
-      neck: { x: t.x, y: t.y + 19 },
-      head: { x: t.x, y: t.y + 27 },
-    };
-    for (const limb of Object.keys(limbInfo)) {
-      const info = limbInfo[limb], side = limb.startsWith('left') ? 'left' : 'right';
-      const isArm = limb.endsWith('Hand');
-      const root = { x: t.x + info.root[0], y: t.y + info.root[1] };
-      const end = poseContacts[limb];
-      const joint = twoBone(root, end, info.upper, info.lower, info.side);
-      if (isArm) {
-        points[`${side}Shoulder`] = root;
-        points[`${side}Elbow`] = joint;
-        points[`${side}Hand`] = end;
-      } else {
-        points[`${side}Hip`] = root;
-        points[`${side}Knee`] = joint;
-        points[`${side}Foot`] = end;
-      }
-    }
-    return { points, torso: t, maxViolation: solved.maxViolation };
-  }
+  const posOf = (id) => holdMap.get(String(id));
   function revealBeta() {
     if (!currentProblem) return;
-    clearInterval(animationTimer);
-    clearInterval(betaTimer);
+    cancelAnimationFrame(betaFrame);
     const button = $('beta-button');
     button.disabled = true;
     button.textContent = 'Planning contacts…';
-    $('beta-status').textContent = 'PLANNING CONTACTS';
-    window.setTimeout(() => {
-      const { contacts, steps, torso: initialTorso } = contactSequence(currentProblem);
-      const list = $('sequence-list');
-      list.replaceChildren(...steps.map((step, i) => sequenceItem(i + 1, step.id, step.limb.replace('Hand', ' hand').replace('Foot', ' foot'), step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
-      const current = { ...contacts };
-      let pose = makePose(current, initialTorso);
-      let maxViolation = pose.maxViolation;
-      let maxContactDrift = 0;
-      let stepIndex = 0, frameIndex = 0;
-      const framesPerMove = 14;
-      drawBoard(currentProblem, -1, pose);
-      button.textContent = 'Animating beta…';
-      betaTimer = setInterval(() => {
-        if (stepIndex >= steps.length) {
-          clearInterval(betaTimer);
-          button.disabled = false;
-          button.textContent = 'Replay beta animation';
-          $('beta-status').textContent = maxContactDrift > 0.1 ? 'CONTACT DRIFT' : maxViolation <= 4 ? 'FEASIBILITY CHECK PASSED' : 'POSE LIMIT WARNING';
-          return;
-        }
-        const step = steps[stepIndex];
-        const from = current[step.limb], target = posOf(step.id);
-        const progress = Math.min(1, (frameIndex + 1) / framesPerMove);
-        pose = makePose(current, pose.torso, { limb: step.limb, from, target, progress });
-        for (const limb of Object.keys(current)) {
-          if (limb === step.limb) continue;
-          const endpoint = pose.points[limb];
-          maxContactDrift = Math.max(maxContactDrift, Math.hypot(endpoint.x - current[limb].x, endpoint.y - current[limb].y));
-        }
-        maxViolation = Math.max(maxViolation, pose.maxViolation);
-        $('beta-status').textContent = `MOVING ${step.limb.toUpperCase()} · ${stepIndex + 1}/${steps.length}`;
-        const highlighted = currentProblem.plan.findIndex((p) => p.id === step.id);
-        drawBoard(currentProblem, highlighted, pose);
-        frameIndex++;
-        if (frameIndex >= framesPerMove) {
-          current[step.limb] = target;
-          pose = makePose(current, pose.torso);
-          maxViolation = Math.max(maxViolation, pose.maxViolation);
-          stepIndex++;
-          frameIndex = 0;
-        }
-      }, 42);
-    }, 10);
+    $('beta-status').textContent = 'SEARCHING CONTACT STATES';
+    ClimbGenPlanner.planAsync(currentProblem, holdMap, { onProgress: (expanded) => { $('beta-status').textContent = `SEARCHING · ${expanded} STATES`; } }).then((result) => {
+      if (!result.ok) {
+        button.disabled = false;
+        button.textContent = 'Try beta search again';
+        $('beta-status').textContent = 'NO VALIDATED CONTACT PLAN';
+        $('route-copy').textContent = `${result.reason} No substitute sequence was shown.`;
+        return;
+      }
+      betaResult = result;
+      currentProblem.betaSteps = result.steps;
+      $('move-count').textContent = result.steps.length;
+      const baseLabel = currentProblem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${currentProblem.source.templateId}`;
+      $('route-copy').textContent = `${currentProblem.holds.length} holds · fresh variant based on ${baseLabel} · ${currentProblem.source.grade}`;
+      $('sequence-list').replaceChildren(...result.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
+      $('planner-diagnostics').textContent = JSON.stringify({ expandedStates: result.expanded, invalidTransitions: result.invalidTransitions, planningTimeMs: result.elapsedMs, weightedCost: Number(result.cost.toFixed(2)), movementTypes: [...new Set(result.steps.map((step) => step.movementType))], feasibility: { geometry: result.diagnostics.maxReachViolation < 0.25 ? 'modeled limb reach satisfied' : 'reach warning', kinematics: result.diagnostics.maxAngleViolationDeg < 1 && result.diagnostics.maxSegmentResidual < 0.1 ? 'modeled joint and segment limits satisfied' : 'pose warning', stability: 'heuristic estimate only', physical: 'unverified; no force, friction, grip, collision, or fall simulation' }, centerOfMassApproximation: result.initialPose.diagnostics.centerOfMass, supportPolygonApproximation: result.initialPose.diagnostics.supportHull, approximateStabilityCost: result.diagnostics.maxEstimatedStabilityCost, maxReachViolation: result.diagnostics.maxReachViolation, maxJointAngleLimitViolationDeg: result.diagnostics.maxAngleViolationDeg, maxTwoSegmentLengthResidual: result.diagnostics.maxSegmentResidual }, null, 2);
+      $('planner-debug').hidden = false;
+      $('playback-controls').hidden = false;
+      button.disabled = false;
+      button.textContent = 'Replay beta animation';
+      playBeta(0);
+    });
   }
+  function playBeta(startIndex = 0) {
+    if (!betaResult?.ok) return;
+    cancelAnimationFrame(betaFrame);
+    betaPaused = false;
+    $('playback-toggle').textContent = 'Pause';
+    let stepIndex = startIndex, started = null;
+    betaPlaybackIndex = startIndex;
+    let current = { ...betaResult.initialContacts };
+    let pose = betaResult.initialPose;
+    for (let i = 0; i < startIndex; i++) { current = { ...betaResult.steps[i].contacts }; pose = betaResult.steps[i].pose; }
+    const tick = (now) => {
+      if (betaPaused) return;
+      if (stepIndex >= betaResult.steps.length) {
+        betaPlaybackIndex = stepIndex;
+        drawBoard(currentProblem, -1, pose);
+        $('beta-status').textContent = betaResult.diagnostics.maxReachViolation < 0.25 && betaResult.diagnostics.maxAngleViolationDeg < 1 ? 'MODELED KINEMATIC LIMITS · PHYSICS UNVERIFIED' : 'POSE WARNINGS · PHYSICS UNVERIFIED';
+        return;
+      }
+      const step = betaResult.steps[stepIndex];
+      if (started == null) started = now;
+      const duration = 520 / Number($('playback-speed').value || 1);
+      const t = Math.min(1, (now - started) / duration);
+      const from = posOf(current[step.limb]), target = posOf(step.id);
+      const swingId = `swing:${stepIndex}`;
+      const movingPlacements = new Map(holdMap);
+      movingPlacements.set(swingId, { x: from.x + (target.x - from.x) * t, y: from.y + (target.y - from.y) * t });
+      const frameContacts = { ...current, [step.limb]: swingId };
+      pose = ClimbGenIK.solve(frameContacts, movingPlacements, pose.torso, { overhangDeg: 40, iterations: 6 });
+      currentPose = pose;
+      $('beta-status').textContent = `${step.movementType.toUpperCase()} · ${step.label.toUpperCase()} · ${stepIndex + 1}/${betaResult.steps.length}`;
+      drawBoard(currentProblem, stepIndex, pose);
+      if (t >= 1) {
+        current = { ...step.contacts };
+        pose = step.pose;
+        stepIndex++;
+        betaPlaybackIndex = stepIndex;
+        started = null;
+      }
+      betaFrame = requestAnimationFrame(tick);
+    };
+    betaFrame = requestAnimationFrame(tick);
+  }
+  $('playback-toggle').addEventListener('click', () => {
+    betaPaused = !betaPaused;
+    $('playback-toggle').textContent = betaPaused ? 'Play' : 'Pause';
+    if (!betaPaused) playBeta(betaPlaybackIndex);
+  });
+  $('playback-replay').addEventListener('click', () => playBeta(0));
+  $('planner-debug').addEventListener('toggle', () => {
+    if ($('planner-debug').open && currentProblem && currentPose) drawBoard(currentProblem, -1, currentPose);
+  });
   function makeProblem() {
     const button = $('generate-button');
     if (generating) return;
@@ -447,8 +261,9 @@
   $('generate-button').addEventListener('click', makeProblem);
   try {
     dataset = window.CLIMBGEN_DATA;
-    if (!dataset?.placements?.length || !dataset?.routes?.length || !dataset?.generated?.length) throw new Error('Bundled TB2 data is missing');
+    if (!dataset?.placements?.length || !dataset?.routes?.length) throw new Error('Bundled TB2 data is missing');
     for (const hold of dataset.placements) holdMap.set(String(hold.id), hold);
+    routeGenerator = ClimbGenRouteGenerator.create(dataset);
     $('route-copy').textContent = `${dataset.filtered_routes.toLocaleString()} real TB2 climbs`;
     $('route-grade').textContent = '40° · TB2 Mirror';
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();

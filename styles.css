@@ -109,6 +109,15 @@ h1 em { color: var(--lime); font-style: normal; }
 .beta-button span { float: right; }
 .beta-button:hover { background: #334436; }
 .beta-button:disabled { cursor: wait; opacity: .7; }
+.playback-controls { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font: 9px var(--mono); }
+.playback-controls button, .playback-controls select { min-height: 29px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--text); font: inherit; cursor: pointer; }
+.playback-controls label { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.planner-debug { margin-top: 8px; color: #9ca99d; font: 9px var(--mono); }
+.planner-debug summary { cursor: pointer; }
+.planner-debug pre { max-height: 145px; overflow: auto; white-space: pre-wrap; color: #aeb8a8; line-height: 1.5; }
+.debug-support { fill: rgba(170, 221, 110, .08); stroke: rgba(170, 221, 110, .65); stroke-width: 1; stroke-dasharray: 4 3; }
+.debug-com { fill: #ffcb5c; stroke: #1b1d17; stroke-width: 1.5; }
+.debug-contact { fill: #82d6f2; stroke: #102126; stroke-width: 1; }
 .model-note { margin-top: auto; padding-top: 17px; display: flex; align-items: flex-start; gap: 8px; color: #84928a; }
 .model-note p { margin: 0; font-size: 8px; line-height: 1.5; }
 .note-mark { color: var(--lime); font-size: 14px; }
