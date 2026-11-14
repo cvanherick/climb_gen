@@ -155,11 +155,7 @@ h1 em { color: var(--lime); font-style: normal; }
 .photo-tool.active { border-color: var(--lime); color: var(--lime); }
 .photo-tool:disabled, .photo-suggest:disabled { opacity: .45; cursor: not-allowed; }
 .photo-detect { border-color: #536846; color: var(--lime); }
-.photo-hold-outline { fill: rgba(72, 148, 255, .08); stroke: #4b9bff; stroke-width: .45; stroke-dasharray: 1 .65; cursor: pointer; }
-.photo-hold-outline.manual { fill: rgba(72, 148, 255, .04); stroke: #6fc7ff; stroke-dasharray: 1.5 1; }
-.photo-hold-outline.detected { fill: rgba(72, 148, 255, .10); }
-.photo-remove-mode .photo-hold-outline, .photo-remove-mode .photo-hold-dot { cursor: crosshair; }
-.photo-hold-dot.auto-detected { fill: #287bffff; }
+.photo-remove-mode .photo-hold-dot { cursor: crosshair; }
 .photo-angle-control { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 10px; color: #8e9b92; font: 8px var(--mono); }
 .photo-angle-control select, .photo-angle-control input { min-height: 30px; border: 1px solid #3a494b; border-radius: 4px; background: #172326; color: var(--text); padding: 0 8px; font: 9px var(--display); }
 .photo-angle-control input { width: 118px; }
@@ -181,10 +177,10 @@ h1 em { color: var(--lime); font-style: normal; }
 .photo-stage:not(.has-photo) svg { display: none; }
 .photo-empty { padding: 60px 20px; color: #65736c; font: 10px var(--mono); text-align: center; }
 .photo-empty[hidden] { display: none; }
-.photo-hold-dot { fill: #286cffaa; stroke: #f6fbff; stroke-width: .32; cursor: pointer; }
-.photo-hold-dot.in-sequence { fill: #df29c6; }
-.photo-hold-dot.photo-start-dot { fill: #09ba48; }
-.photo-hold-label { fill: white; font: 1.2px var(--mono); stroke: #102021; stroke-width: .18px; paint-order: stroke; }
+.photo-hold-dot { fill: rgba(25, 126, 255, .06); stroke: #1782ff; stroke-width: .62; cursor: pointer; vector-effect: non-scaling-stroke; }
+.photo-hold-dot.auto-detected { fill: rgba(25, 126, 255, .03); }
+.photo-hold-dot.in-sequence { fill: rgba(225, 30, 204, .06); stroke: #e71dcc; stroke-width: .8; }
+.photo-hold-dot.photo-start-dot { fill: rgba(14, 194, 76, .08); stroke: #12c94f; stroke-width: .9; }
 .photo-sequence { min-height: 230px; padding: 12px; border: 1px solid #314042; border-radius: 4px; background: #1a2729; }
 .photo-sequence-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .photo-sequence-top h3 { margin: 0; color: var(--text); font: 600 12px var(--display); }
