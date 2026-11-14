@@ -18,4 +18,4 @@ The reach check is a simple 2D distance approximation. It does not model grip fo
 
 ## Deploy with GitHub Pages
 
-The `.github/workflows/pages.yml` workflow builds the self-contained app and deploys it to GitHub Pages whenever a change is pushed to `main`. It can also be run manually from the repository’s Actions tab. After the first push, open the repository’s **Settings → Pages** and choose **GitHub Actions** as the build and deployment source if Pages is not already enabled.
+The `.github/workflows/pages.yml` workflow builds the app and deploys it to GitHub Pages whenever a change is pushed to `main`. It can also be run manually from the repository’s Actions tab. The Pages build serves the app code, TB2 data, and board images as separate same-origin files; `python3 scripts/build_standalone.py` still creates a self-contained local copy.

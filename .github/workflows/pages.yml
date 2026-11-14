@@ -26,9 +26,7 @@ jobs:
 
       - name: Build standalone app
         run: |
-          python scripts/build_standalone.py
-          mkdir dist
-          cp index.html dist/index.html
+          python scripts/build_pages.py
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
