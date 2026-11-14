@@ -29,3 +29,11 @@ The `.github/workflows/pages.yml` workflow builds the app and deploys it to GitH
 The name entered in the app is the route title and a deterministic seed for selecting from the prepared grade-conditioned model samples. The browser avoids repeats until it has used the selected grade’s prepared pool. The bundled BoardLib route rows do not contain climb names, so name text does not have learned semantic meaning yet. Retraining on a dataset with route names would be needed for text-guided holds.
 
 “Reveal beta animation” searches a contact sequence through the route’s hand and foot holds. It draws a two-dimensional climber over the authentic TB2 Mirror board image, solves two-segment arm and leg poses, and keeps planted contacts fixed while the moving limb swings. The feasibility badge reports joint reach limits and contact drift; this model remains a board-plane visualization, not a full-body physics simulation.
+
+### Feasibility experiment
+
+The live beta was checked on the known short V1 climb “Known Short Climb” (7 selected holds, 4 hand moves). The planner found a five-contact sequence including a foot move, reached the finish, and reported `FEASIBILITY CHECK PASSED`; planted-contact drift stayed at zero, and the solver kept its reach error within the pass threshold. This is one short-route experiment, not a validation across the full generated pool.
+
+### Motion-data direction
+
+[ClimbingCap / AscendMotion](https://openaccess.thecvf.com/content/CVPR2025/html/Yan_ClimbingCap_Multi-Modal_Dataset_and_Method_for_Rock_Climbing_in_World_CVPR_2025_paper.html) is a promising source for a learned climbing-motion prior. The paper describes 344 minutes of labeled and 441 minutes of unlabeled climbing data from 22 skilled climbers across 12 walls, with synchronized RGB, LiDAR, IMU, and 3D pose/trajectory labels. Those sequences could improve body poses and transitions, while TB2 holds should remain the contact targets. The motion data is not yet integrated; aligning its world coordinates and contact conventions to the flat TB2 Mirror board is the next step.
