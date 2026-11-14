@@ -3,7 +3,7 @@
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.ClimbGenRouteGenerator = api;
-})(typeof globalThis === 'object' ? globalThis : this, () => {
+})(typeof globalThis === 'object' ? globalThis : this, (root) => {
   const roles = { start: 5, hand: 6, finish: 7, foot: 8 };
   const signature = (holds) => holds.map(([id, role]) => `${id}r${role}`).sort().join('|');
   function hash(value) {
@@ -60,6 +60,8 @@
   }
   function create(data, options = {}) {
     const placements = new Map(data.placements.map((p) => [String(p.id), p]));
+    const evaluatorApi = root.ClimbGenRouteEvaluator || (typeof require === 'function' ? require('./route_evaluator') : null);
+    const evaluator = options.evaluator || evaluatorApi?.create?.();
     const frequencyByGrade = new Map();
     const routesByGrade = new Map();
     for (const route of data.routes) {
@@ -96,6 +98,12 @@
       const templates = routesByGrade.get(chosenGrade) || [];
       if (!templates.length) throw new Error(`No quality-checked TB2 templates for ${chosenGrade}`);
       const gradeFrequency = frequencyByGrade.get(chosenGrade) || { 6: new Map(), 8: new Map() };
+      // Rank a small pool of screened variants when the learned evaluator is
+      // available. Without a trained model, retain the original first-valid
+      // behavior so generation remains usable in offline/dev builds.
+      const rankAttempts = evaluator ? Math.max(1, Math.floor(options.rankAttempts ?? 10)) : 1;
+      const ranked = [];
+      const rankedSignatures = new Set();
       // Try many local variants before moving to another highly-rated template.
       for (let attempt = 0; attempt < (options.attempts ?? 900); attempt++) {
         const communityTemplates = templates.filter((r) => r.templateKind !== 'ddpm').slice(0, Math.max(30, Math.ceil(templates.filter((r) => r.templateKind !== 'ddpm').length * 0.75)));
@@ -136,9 +144,17 @@
         }
         if (!changed) continue;
         const key = signature(holds);
-        if (seen.has(key) || !assess(holds, placements).ok) continue;
-        seen.add(key);
-        return { holds, grade: chosenGrade, source: { grade: chosenGrade, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true };
+        if (seen.has(key) || rankedSignatures.has(key) || !assess(holds, placements).ok) continue;
+        rankedSignatures.add(key);
+        const evaluation = evaluator?.score(holds, placements, chosenGrade) || null;
+        ranked.push({ holds, grade: chosenGrade, source: { grade: chosenGrade, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true, evaluation });
+        if (ranked.length >= rankAttempts) break;
+      }
+      if (ranked.length) {
+        ranked.sort((a, b) => (b.evaluation?.rankScore ?? 0) - (a.evaluation?.rankScore ?? 0));
+        const chosen = ranked[0];
+        seen.add(chosen.signature);
+        return chosen;
       }
       throw new Error(`Could not find a new quality-checked ${chosenGrade} variant after ${options.attempts ?? 900} attempts. Generate again.`);
     }

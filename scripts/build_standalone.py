@@ -6,9 +6,11 @@ ROOT = Path(__file__).resolve().parents[1]
 template = (ROOT / "index.shell.html").read_text()
 styles = (ROOT / "styles.css").read_text()
 dataset = (ROOT / "data/tb2-mirror-40.js").read_text()
+route_evaluator_data = (ROOT / "data/tb2-route-evaluator.js").read_text()
 app = (ROOT / "app.js").read_text()
 models = (ROOT / "ik.js").read_text() + "\n" + (ROOT / "planner.js").read_text()
 route_generator = (ROOT / "route_generator.js").read_text()
+route_evaluator = (ROOT / "route_evaluator.js").read_text()
 photo_suggestions = (ROOT / "photo_suggestions.js").read_text()
 photo_hold_detector = (ROOT / "photo_hold_detector.js").read_text()
 image_data = {
@@ -18,8 +20,8 @@ image_data = {
 
 replacements = {
     "<!-- INLINE_STYLES -->": f"<style>\n{styles}\n</style>",
-    "<!-- INLINE_DATA -->": f"<script>\n{dataset}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
-    "<!-- INLINE_MODELS -->": f"<script>\n{route_generator}\n{models}\n{photo_suggestions}\n{photo_hold_detector}\n</script>",
+    "<!-- INLINE_DATA -->": f"<script>\n{dataset}\n{route_evaluator_data}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
+    "<!-- INLINE_MODELS -->": f"<script>\n{route_evaluator}\n{route_generator}\n{models}\n{photo_suggestions}\n{photo_hold_detector}\n</script>",
     "<!-- INLINE_APP -->": f"<script>\n{app}\n</script>",
 }
 for marker, content in replacements.items():

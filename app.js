@@ -8,7 +8,7 @@
   };
   const board = { left: -68, right: 68, bottom: 0, top: 144, x: 20, y: 13.26, width: 560, height: 593.48 };
   const holdMap = new Map();
-  let dataset, routeGenerator, generatedCount = 0, betaFrame = 0, betaPaused = false, betaPlaybackIndex = 0, betaResult = null, currentPose = null, generating = false, currentProblem = null;
+  let dataset, routeGenerator, generatedCount = 0, betaFrame = 0, betaPaused = false, betaPlaybackIndex = 0, betaResult = null, betaAlternatives = [], activeBetaIndex = 0, currentPose = null, generating = false, currentProblem = null;
 
   function point(x, y) {
     return {
@@ -110,6 +110,7 @@
       holds: routeHolds(candidate),
       source: candidate.source,
       changed: candidate.changed,
+      evaluation: candidate.evaluation,
       name: climbName,
       betaPlan: candidate.betaPlan,
     };
@@ -121,7 +122,10 @@
     $('route-title').textContent = problem.name;
     $('route-grade').textContent = `40° · TARGET ${problem.source.grade}`;
     const baseLabel = problem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${problem.source.templateId}`;
-    $('route-copy').textContent = `${problem.holds.length} holds · grade-conditioned ${problem.source.grade} variation · based on ${baseLabel}`;
+    const modelReadout = problem.evaluation
+      ? ` · learned estimate ${problem.evaluation.predictedGrade} · community quality estimate ${problem.evaluation.quality.toFixed(1)}/5`
+      : '';
+    $('route-copy').textContent = `${problem.holds.length} holds · grade-conditioned ${problem.source.grade} variation${modelReadout} · based on ${baseLabel}`;
     $('hold-count').textContent = problem.holds.length;
     $('move-count').textContent = '—';
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
@@ -132,6 +136,10 @@
     $('playback-controls').hidden = true;
     $('planner-debug').hidden = true;
     betaResult = null;
+    betaAlternatives = [];
+    activeBetaIndex = 0;
+    $('playback-alternative').textContent = 'Alternative beta';
+    $('playback-alternative').disabled = true;
     currentPose = null;
     betaPlaybackIndex = 0;
     $('board-status').textContent = problem.changed ? 'GENERATED' : 'COMMUNITY ROUTE';
@@ -170,6 +178,10 @@
         return;
       }
       betaResult = result;
+      betaAlternatives = result.alternatives || [result];
+      activeBetaIndex = 0;
+      $('playback-alternative').disabled = betaAlternatives.length < 2;
+      $('playback-alternative').textContent = betaAlternatives.length > 1 ? `Beta 1 / ${betaAlternatives.length} · next` : 'One beta found';
       currentProblem.betaSteps = result.steps;
       $('move-count').textContent = result.steps.length;
       const baseLabel = currentProblem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${currentProblem.source.templateId}`;
@@ -231,6 +243,17 @@
     if (!betaPaused) playBeta(betaPlaybackIndex);
   });
   $('playback-replay').addEventListener('click', () => playBeta(0));
+  $('playback-alternative').addEventListener('click', () => {
+    if (betaAlternatives.length < 2) return;
+    activeBetaIndex = (activeBetaIndex + 1) % betaAlternatives.length;
+    betaResult = betaAlternatives[activeBetaIndex];
+    currentProblem.betaPlan = betaResult;
+    currentProblem.betaSteps = betaResult.steps;
+    $('playback-alternative').textContent = `Beta ${activeBetaIndex + 1} / ${betaAlternatives.length} · next`;
+    $('move-count').textContent = betaResult.steps.length;
+    $('sequence-list').replaceChildren(...betaResult.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
+    playBeta(0);
+  });
   $('planner-debug').addEventListener('toggle', () => {
     if ($('planner-debug').open && currentProblem && currentPose) drawBoard(currentProblem, -1, currentPose);
   });

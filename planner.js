@@ -53,7 +53,15 @@
       const goals = beam.filter((s) => required.filter((h) => h.role === 7).some((h) => s.visited.has(idOf(h))) && required.filter((h) => h.role === 6).every((h) => s.visited.has(idOf(h))));
       if (goals.length) {
         goals.sort((a, b) => a.g - b.g);
-        return result(goals[0], initialPose, expanded, true, { invalidTransitions, elapsedMs: Date.now() - startedAt });
+        const alternatives = [], signatures = new Set();
+        for (const goal of goals) {
+          const signature = goal.path.map((step) => `${step.limb}:${step.id}`).join('|');
+          if (signatures.has(signature)) continue;
+          signatures.add(signature);
+          alternatives.push(result(goal, initialPose, expanded, true, { invalidTransitions, elapsedMs: Date.now() - startedAt }));
+          if (alternatives.length >= Math.max(1, options.numAlternatives ?? 3)) break;
+        }
+        return { ...alternatives[0], alternatives };
       }
       const nextBeam = [];
       for (const current of beam) {
