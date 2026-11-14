@@ -2,6 +2,10 @@
   const svg = document.getElementById('board-svg');
   const $ = (id) => document.getElementById(id);
   const roleName = { 5: 'start', 6: 'hand', 7: 'finish', 8: 'foot' };
+  const boardAssets = window.CLIMBGEN_ASSETS || {
+    wood: './assets/tb2-12x12-mirror-wood.png',
+    plastic: './assets/tb2-12x12-mirror-plastic.png',
+  };
   const board = { left: -68, right: 68, bottom: 0, top: 144, x: 20, y: 13.26, width: 560, height: 593.48 };
   const holdMap = new Map();
   let dataset, generatedCount = 0, animationTimer, generating = false;
@@ -20,8 +24,8 @@
   function drawBoard(route = null, activeStep = -1) {
     svg.replaceChildren();
     svg.append(
-      svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: window.CLIMBGEN_ASSETS.plastic, preserveAspectRatio: 'none' }),
-      svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: window.CLIMBGEN_ASSETS.wood, preserveAspectRatio: 'none' }),
+      svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: boardAssets.plastic, preserveAspectRatio: 'none' }),
+      svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: boardAssets.wood, preserveAspectRatio: 'none' }),
     );
     if (route) {
       route.holds.forEach((hold) => {

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -13,17 +14,18 @@ DIST = ROOT / "dist"
 subprocess.run([sys.executable, str(ROOT / "scripts/build_candidate_pool.py")], check=True)
 
 html = (ROOT / "index.shell.html").read_text()
+def cache_version(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+
+data_path = ROOT / "data/tb2-mirror-40.js"
+app_path = ROOT / "app.js"
+style_path = ROOT / "styles.css"
 replacements = {
-    "<!-- INLINE_STYLES -->": '<link rel="stylesheet" href="./styles.css" />',
+    "<!-- INLINE_STYLES -->": f'<link rel="stylesheet" href="./styles.css?v={cache_version(style_path)}" />',
     "<!-- INLINE_DATA -->": (
-        '<script>window.addEventListener("error", event => '
-        '{ window.CLIMBGEN_LOAD_ERROR = event.message || "script load error"; });</script>\n'
-        '<script src="./data/tb2-mirror-40.js"></script>\n'
-        '<script>window.CLIMBGEN_ASSETS = '
-        '{"wood":"./assets/tb2-12x12-mirror-wood.png",'
-        '"plastic":"./assets/tb2-12x12-mirror-plastic.png"};</script>'
+        f'<script src="./data/tb2-mirror-40.js?v={cache_version(data_path)}"></script>'
     ),
-    "<!-- INLINE_APP -->": '<script src="./app.js"></script>',
+    "<!-- INLINE_APP -->": f'<script src="./app.js?v={cache_version(app_path)}"></script>',
 }
 for marker, content in replacements.items():
     if html.count(marker) != 1:
