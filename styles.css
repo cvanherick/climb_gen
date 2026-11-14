@@ -155,7 +155,7 @@ h1 em { color: var(--lime); font-style: normal; }
 .photo-tool.active { border-color: var(--lime); color: var(--lime); }
 .photo-tool:disabled, .photo-suggest:disabled { opacity: .45; cursor: not-allowed; }
 .photo-detect { border-color: #536846; color: var(--lime); }
-.photo-remove-mode .photo-hold-dot { cursor: crosshair; }
+.photo-remove-mode .photo-hold-outline, .photo-remove-mode .photo-hold-outline-shadow, .photo-remove-mode .photo-hold-dot { cursor: crosshair; }
 .photo-angle-control { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 10px; color: #8e9b92; font: 8px var(--mono); }
 .photo-angle-control select, .photo-angle-control input { min-height: 30px; border: 1px solid #3a494b; border-radius: 4px; background: #172326; color: var(--text); padding: 0 8px; font: 9px var(--display); }
 .photo-angle-control input { width: 118px; }
@@ -177,10 +177,13 @@ h1 em { color: var(--lime); font-style: normal; }
 .photo-stage:not(.has-photo) svg { display: none; }
 .photo-empty { padding: 60px 20px; color: #65736c; font: 10px var(--mono); text-align: center; }
 .photo-empty[hidden] { display: none; }
-.photo-hold-dot { fill: rgba(25, 126, 255, .06); stroke: #1782ff; stroke-width: .62; cursor: pointer; vector-effect: non-scaling-stroke; }
-.photo-hold-dot.auto-detected { fill: rgba(25, 126, 255, .03); }
-.photo-hold-dot.in-sequence { fill: rgba(225, 30, 204, .06); stroke: #e71dcc; stroke-width: .8; }
-.photo-hold-dot.photo-start-dot { fill: rgba(14, 194, 76, .08); stroke: #12c94f; stroke-width: .9; }
+.photo-hold-outline-shadow { fill: none; stroke: rgba(0, 0, 0, .78); stroke-width: 1.45; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+.photo-hold-outline { fill: rgba(255, 255, 255, .025); stroke: #f8fbff; stroke-width: .68; stroke-linejoin: round; cursor: pointer; vector-effect: non-scaling-stroke; }
+.photo-hold-outline.manual, .photo-hold-dot.manual { stroke: #1782ff; }
+.photo-hold-outline.in-sequence, .photo-hold-dot.in-sequence { fill: rgba(225, 30, 204, .08); stroke: #ec21d1; stroke-width: .95; }
+.photo-hold-outline.photo-start-dot, .photo-hold-dot.photo-start-dot { fill: rgba(14, 194, 76, .08); stroke: #12c94f; stroke-width: 1; }
+.photo-hold-outline.photo-finish-dot, .photo-hold-dot.photo-finish-dot { fill: rgba(255, 62, 74, .08); stroke: #ff3e4a; stroke-width: 1; }
+.photo-hold-dot { fill: rgba(25, 126, 255, .04); stroke: #f8fbff; stroke-width: .7; cursor: pointer; vector-effect: non-scaling-stroke; }
 .photo-sequence { min-height: 230px; padding: 12px; border: 1px solid #314042; border-radius: 4px; background: #1a2729; }
 .photo-sequence-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .photo-sequence-top h3 { margin: 0; color: var(--text); font: 600 12px var(--display); }

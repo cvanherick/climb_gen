@@ -228,6 +228,24 @@
     return mask;
   }
 
+  function convexHull(points) {
+    if (points.length < 4) return points;
+    const sorted = points.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower = [], upper = [];
+    for (const point of sorted) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) lower.pop();
+      lower.push(point);
+    }
+    for (let index = sorted.length - 1; index >= 0; index--) {
+      const point = sorted[index];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) upper.pop();
+      upper.push(point);
+    }
+    lower.pop(); upper.pop();
+    return [...lower, ...upper];
+  }
+
   function componentCandidates({ width, height, lab, labels, centers, wallMask }) {
     const count = width * height;
     const minArea = Math.max(18, Math.round(count * 0.00004));
@@ -244,6 +262,7 @@
       let top = 0, area = 0, perimeter = 0;
       let minX = width, maxX = -1, minY = height, maxY = -1, touchesWallEdge = false;
       let sumX = 0, sumY = 0, sumRingL = 0, sumRingA = 0, sumRingB = 0, ringCount = 0, sumColorVariance = 0;
+      const boundary = [];
       stack[top++] = start;
 
       while (top) {
@@ -256,33 +275,33 @@
         // Inline four connected-neighbor checks. This runs once per pixel, so
         // avoid allocating coordinate/neighbor arrays in the hot loop.
         let other, k;
-        if (y === 0) perimeter++;
+        if (y === 0) { perimeter++; boundary.push([x, y]); }
         else {
           other = pixel - width;
-          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; }
+          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; boundary.push([x, y]); }
           else if (labels[other] === cluster) { if (!visited[other]) { visited[other] = 1; stack[top++] = other; } }
-          else { perimeter++; k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
+          else { perimeter++; boundary.push([x, y]); k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
         }
-        if (y === height - 1) perimeter++;
+        if (y === height - 1) { perimeter++; boundary.push([x, y]); }
         else {
           other = pixel + width;
-          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; }
+          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; boundary.push([x, y]); }
           else if (labels[other] === cluster) { if (!visited[other]) { visited[other] = 1; stack[top++] = other; } }
-          else { perimeter++; k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
+          else { perimeter++; boundary.push([x, y]); k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
         }
-        if (x === 0) perimeter++;
+        if (x === 0) { perimeter++; boundary.push([x, y]); }
         else {
           other = pixel - 1;
-          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; }
+          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; boundary.push([x, y]); }
           else if (labels[other] === cluster) { if (!visited[other]) { visited[other] = 1; stack[top++] = other; } }
-          else { perimeter++; k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
+          else { perimeter++; boundary.push([x, y]); k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
         }
-        if (x === width - 1) perimeter++;
+        if (x === width - 1) { perimeter++; boundary.push([x, y]); }
         else {
           other = pixel + 1;
-          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; }
+          if (wallMask && !wallMask[other]) { perimeter++; touchesWallEdge = true; boundary.push([x, y]); }
           else if (labels[other] === cluster) { if (!visited[other]) { visited[other] = 1; stack[top++] = other; } }
-          else { perimeter++; k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
+          else { perimeter++; boundary.push([x, y]); k = other * 3; sumRingL += lab[k]; sumRingA += lab[k + 1]; sumRingB += lab[k + 2]; ringCount++; }
         }
       }
 
@@ -314,15 +333,18 @@
       const padX = Math.max(1, Math.round(boxWidth * 0.08)), padY = Math.max(1, Math.round(boxHeight * 0.08));
       const x0 = clamp(minX - padX, 0, width - 1), x1 = clamp(maxX + padX, 0, width - 1);
       const y0 = clamp(minY - padY, 0, height - 1), y1 = clamp(maxY + padY, 0, height - 1);
+      const outline = convexHull(boundary);
       candidates.push({
         x: (sumX / area + 0.5) / width * 100,
         y: (sumY / area + 0.5) / height * 100,
-        polygon: [
-          { x: x0 / width * 100, y: y0 / height * 100 },
-          { x: (x1 + 1) / width * 100, y: y0 / height * 100 },
-          { x: (x1 + 1) / width * 100, y: (y1 + 1) / height * 100 },
-          { x: x0 / width * 100, y: (y1 + 1) / height * 100 },
-        ],
+        polygon: outline.length >= 3
+          ? outline.map(([px, py]) => ({ x: (px + 0.5) / width * 100, y: (py + 0.5) / height * 100 }))
+          : [
+            { x: x0 / width * 100, y: y0 / height * 100 },
+            { x: (x1 + 1) / width * 100, y: y0 / height * 100 },
+            { x: (x1 + 1) / width * 100, y: (y1 + 1) / height * 100 },
+            { x: x0 / width * 100, y: (y1 + 1) / height * 100 },
+          ],
         box: { x: x0 / width * 100, y: y0 / height * 100, width: (x1 - x0 + 1) / width * 100, height: (y1 - y0 + 1) / height * 100 },
         area, confidence, cluster, contrast,
       });
@@ -339,16 +361,13 @@
 
   function isDuplicate(candidate, prior) {
     const overlap = intersectionOverUnion(candidate, prior);
-    if (overlap < 0.3) return false;
+    if (overlap < 0.18) return false;
     const dx = candidate.x - prior.x, dy = candidate.y - prior.y;
     const distance = Math.hypot(dx, dy);
-    const diagonal = Math.hypot(
-      Math.min(candidate.box.width, prior.box.width),
-      Math.min(candidate.box.height, prior.box.height),
-    );
-    // Suppress repeated color-cluster outlines for the same hold while keeping
-    // neighboring holds when their centers remain distinct.
-    return distance < diagonal * 0.34 || overlap > 0.78;
+    const minimumDiagonal = Math.sqrt(Math.min(candidate.box.width * candidate.box.height, prior.box.width * prior.box.height));
+    // Require both substantial box overlap and nearby centers. This removes a
+    // hold reported by both segmentation passes without merging close holds.
+    return distance < minimumDiagonal * 0.58 || overlap > 0.78;
   }
 
   function detect(image, options = {}) {

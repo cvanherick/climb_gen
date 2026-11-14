@@ -278,7 +278,7 @@
       <button id="photo-home" class="back-home" type="button">← All tools</button>
       <section class="photo-builder" aria-labelledby="photo-builder-title">
         <div class="photo-builder-heading"><div><p class="eyebrow">EXPERIMENTAL TOOL</p><h2 id="photo-builder-title">Build a sequence on your wall</h2><p>Upload a wall photo, mark holds, choose a start, then explore next-hold suggestions.</p></div><span class="photo-angle">PHOTO MODE</span></div>
-        <div class="photo-builder-controls"><label class="photo-upload">Choose wall photo<input id="photo-file" type="file" accept="image/*" /></label><div class="photo-tools"><button type="button" id="photo-detect" class="photo-tool photo-detect" disabled>Auto-detect holds</button><button type="button" id="photo-calibrate-mode" class="photo-tool">Calibrate wall plane</button><button type="button" id="photo-mark-mode" class="photo-tool active">Add missed holds</button><button type="button" id="photo-remove-mode" class="photo-tool">Remove false marks</button><button type="button" id="photo-start-mode" class="photo-tool">Select start</button><button type="button" id="photo-reset-plane" class="photo-tool" disabled>Reset corners</button><button type="button" id="photo-undo" class="photo-tool" disabled>Undo</button><button type="button" id="photo-clear" class="photo-tool">Clear holds</button></div></div>
+        <div class="photo-builder-controls"><label class="photo-upload">Choose wall photo<input id="photo-file" type="file" accept="image/*" /></label><div class="photo-tools"><button type="button" id="photo-detect" class="photo-tool photo-detect" disabled>Scan wall holds</button><button type="button" id="photo-calibrate-mode" class="photo-tool">Mark wall corners</button><button type="button" id="photo-mark-mode" class="photo-tool active">Add missed holds</button><button type="button" id="photo-remove-mode" class="photo-tool">Remove false marks</button><button type="button" id="photo-start-mode" class="photo-tool">Select start</button><button type="button" id="photo-reset-plane" class="photo-tool" disabled>Reset corners</button><button type="button" id="photo-undo" class="photo-tool" disabled>Undo</button><button type="button" id="photo-clear" class="photo-tool">Clear holds</button></div></div>
         <div class="photo-analysis" aria-label="Photo analysis status"><div><span>WALL PLANE</span><b id="photo-plane-status">Not calibrated</b></div><div><span>USER-SET WALL ANGLE</span><b id="photo-angle-status">Unknown</b></div><div><span>HOLD DETECTION</span><b id="photo-detection-status">Waiting for photo</b></div><p id="photo-analysis-note">The uploaded photo stays in this browser. For cleaner results, mark the four wall corners; detection will ignore everything outside that wall. Local contrast and color segmentation proposes hold outlines, which still need review.</p></div>
         <div class="photo-angle-control"><label for="photo-wall-type">Wall angle</label><select id="photo-wall-type"><option value="unknown">Unknown</option><option value="-10">Slab (approx.)</option><option value="0">Vertical</option><option value="40">Overhang (approx.)</option></select><label for="photo-wall-angle">Known degrees from vertical</label><input id="photo-wall-angle" type="number" min="-20" max="70" step="1" placeholder="Optional" /></div>
         <p id="photo-status" class="photo-status" aria-live="polite">Choose a photo to begin. Your image stays in this browser session.</p>
@@ -344,7 +344,7 @@
       $('photo-angle-status').textContent = selectedAngle == null ? 'Unknown' : `${selectedAngle}° ${selectedAngle > 0 ? 'overhang' : selectedAngle < 0 ? 'slab' : 'vertical'}`;
       if (homography) {
         $('photo-plane-status').textContent = 'Rectified from 4 corners';
-        $('photo-analysis-note').textContent = 'Detection is restricted to the four marked wall corners. Hold positions are perspective-rectified; physical wall angle and scale remain unknown. Review the circles and correct them as needed.';
+        $('photo-analysis-note').textContent = 'Detection is restricted to the four marked wall corners. Hold positions are perspective-rectified; physical wall angle and scale remain unknown. Review each outline and correct it as needed.';
       } else {
         $('photo-plane-status').textContent = corners.length ? `${corners.length}/4 corners marked` : 'Not calibrated';
         $('photo-analysis-note').textContent = 'For cleaner detection, mark the four wall corners; the next scan ignores everything outside that wall. Local contrast and color segmentation proposes hold outlines; review them, remove false marks, and add missed holds. Calibration corrects perspective but does not estimate physical wall inclination or distance.';
@@ -376,10 +376,16 @@
         });
       }
       holds.forEach((hold, index) => {
-        const size = Math.max(Number(hold.box?.width || 0), Number(hold.box?.height || 0));
-        const radius = Math.max(1.65, Math.min(3.5, size * .44));
-        const circle = svgEl('circle', { cx: hold.x, cy: hold.y, r: radius, class: `photo-hold-dot${sequence.includes(index) ? ' in-sequence' : ''}${sequence[0] === index ? ' photo-start-dot' : ''}${hold.source === 'auto' ? ' auto-detected' : ''}`, 'data-index': index });
-        overlay.append(circle);
+        const routeClass = `${sequence.includes(index) ? ' in-sequence' : ''}${sequence[0] === index ? ' photo-start-dot' : ''}${index === finished ? ' photo-finish-dot' : ''}${hold.source === 'auto' ? ' auto-detected' : ' manual'}`;
+        if (Array.isArray(hold.polygon) && hold.polygon.length >= 3) {
+          const points = hold.polygon.map((point) => `${point.x},${point.y}`).join(' ');
+          const shadow = svgEl('polygon', { points, class: `photo-hold-outline-shadow${routeClass}`, 'data-index': index });
+          const outline = svgEl('polygon', { points, class: `photo-hold-outline${routeClass}`, 'data-index': index });
+          overlay.append(shadow, outline);
+        } else {
+          const circle = svgEl('circle', { cx: hold.x, cy: hold.y, r: 2, class: `photo-hold-dot${routeClass}`, 'data-index': index });
+          overlay.append(circle);
+        }
       });
       sequenceList.replaceChildren();
       if (!sequence.length) {
@@ -398,7 +404,7 @@
       }));
       $('photo-undo').disabled = holds.length === 0 || detecting;
       $('photo-detect').disabled = image.hidden || detecting;
-      $('photo-detect').textContent = detecting ? 'Detecting…' : 'Auto-detect holds';
+      $('photo-detect').textContent = detecting ? 'Scanning…' : 'Scan wall holds';
       suggest.disabled = !sequence.length || holds.length < 2 || finished != null;
       suggest.textContent = finished == null ? 'Suggest next holds' : 'Sequence finished';
       updatePlaneStatus();
@@ -442,7 +448,7 @@
         status.textContent = `${holds.length} hold${holds.length === 1 ? '' : 's'} marked.`;
       } else {
         const mark = event.target.closest('[data-index]');
-        if (!mark) { status.textContent = mode === 'remove' ? 'Tap a hold circle to remove it.' : 'Tap one hold circle to select the start.'; return; }
+        if (!mark) { status.textContent = mode === 'remove' ? 'Tap a hold outline to remove it.' : 'Tap one hold outline to select the start.'; return; }
         const index = Number(mark.dataset.index);
         if (mode === 'remove') {
           removeHold(index);
@@ -480,6 +486,12 @@
     }
     async function autoDetectHolds() {
       if (!image.src || image.hidden) return;
+      if (corners.length !== 4) {
+        $('photo-detection-status').textContent = 'Mark wall corners first';
+        status.textContent = 'Tap Mark wall corners and select the four wall corners in order. The scan will ignore everything outside the wall.';
+        setMode('calibrate');
+        return;
+      }
       const detector = window.ClimbGenPhotoDetector;
       if (!detector?.detect) {
         $('photo-detection-status').textContent = 'Detector unavailable';
@@ -488,7 +500,7 @@
       }
       detecting = true;
       $('photo-detect').disabled = true;
-      $('photo-detect').textContent = 'Detecting…';
+      $('photo-detect').textContent = 'Scanning…';
       $('photo-detection-status').textContent = 'Detecting on device…';
       status.textContent = 'Scanning the photo for hold outlines…';
       try {
@@ -510,7 +522,7 @@
           const confidenceValues = autoHolds.map((hold) => Number(hold.confidence)).filter(Number.isFinite);
           const average = confidenceValues.length ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length : null;
           $('photo-detection-status').textContent = `${autoHolds.length} candidates${result?.method ? ` · ${result.method}` : ''}`;
-          status.textContent = `Highlighted ${autoHolds.length} hold candidates${average == null ? '' : ` · ${Math.round(average * 100)}% score`}${corners.length === 4 ? ' inside the marked wall' : ' across the full photo'}. Remove false circles or add missed holds. Detection runs locally with image contrast and color boundaries; it is not yet a trained climbing-wall model.${result?.note ? ` ${result.note}` : ''}`;
+          status.textContent = `Outlined ${autoHolds.length} hold candidates${average == null ? '' : ` · ${Math.round(average * 100)}% score`} inside the marked wall. Remove false outlines or add missed holds. Detection runs locally with image contrast and color boundaries; it is not yet a trained climbing-wall model.${result?.note ? ` ${result.note}` : ''}`;
         }
       } catch (error) {
         $('photo-detection-status').textContent = 'Detection failed';
