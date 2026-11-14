@@ -92,58 +92,93 @@ def replacement(role, old_id, used):
     return rng.choices(candidates, weights=[row[1] for row in candidates], k=1)[0][0]
 
 
-templates = [
-    route for route in data["routes"]
-    if 1 <= sum(role == 5 for _, role in route["holds"]) <= 2
-    and 3 <= sum(role == 6 for _, role in route["holds"]) <= 5
-    and sum(role == 7 for _, role in route["holds"]) == 1
-]
-rng.shuffle(templates)
-generated = []
-seen = set(known)
-attempts = 0
-while len(generated) < 120 and attempts < 25000:
-    template = templates[attempts % len(templates)]
-    attempts += 1
-    holds = [[int(hold_id), int(role)] for hold_id, role in template["holds"]]
-    replaceable = [i for i, (_, role) in enumerate(holds) if role in (6, 8)]
-    if not replaceable:
-        continue
-    target_count = 2 if len(replaceable) > 2 and rng.random() < .18 else 1
-    changed = 0
-    used = {hold_id for hold_id, _ in holds}
-    used_indexes = set()
-    for _ in range(target_count):
-        choices = [i for i in replaceable if i not in used_indexes]
-        if not choices:
-            break
-        index = rng.choice(choices)
-        role = holds[index][1]
-        new_id = replacement(role, holds[index][0], used)
-        if new_id is None:
-            continue
-        used.remove(holds[index][0])
-        used.add(new_id)
-        used_indexes.add(index)
-        holds[index][0] = new_id
-        changed += 1
-    key = signature(holds)
-    if not changed or key in seen:
-        continue
-    movement_plan = plan(holds)
-    if not movement_plan:
-        continue
-    seen.add(key)
-    generated.append({
-        "holds": holds,
-        "plan": movement_plan,
-        "source": {"grade": template["grade"]},
-        "changed": changed,
-    })
+grade_templates = {}
+for route in data["routes"]:
+    route_holds = route["holds"]
+    if (1 <= sum(role == 5 for _, role in route_holds) <= 2
+            and 3 <= sum(role == 6 for _, role in route_holds) <= 5
+            and sum(role == 7 for _, role in route_holds) == 1):
+        grade_templates.setdefault(route["grade"], []).append(route)
 
-if len(generated) < 50:
-    raise SystemExit(f"Only found {len(generated)} reach-checked novel routes after {attempts} attempts")
+# Balance the prepared pool by grade so the browser can condition route
+# generation on an exact target instead of mostly returning common grades.
+grades = [f"V{value}" for value in range(12) if f"V{value}" in grade_templates]
+target_per_grade = 10
+max_attempts_per_grade = 1800
+generated = []
+seen_variations = set(known)
+seen_candidates = set()
+attempts = 0
+for grade in grades:
+    templates = grade_templates[grade]
+    rng.shuffle(templates)
+    grade_candidates = []
+    for _ in range(max_attempts_per_grade):
+        if len(grade_candidates) >= target_per_grade:
+            break
+        template = rng.choice(templates)
+        holds = [[int(hold_id), int(role)] for hold_id, role in template["holds"]]
+        replaceable = [i for i, (_, role) in enumerate(holds) if role in (6, 8)]
+        attempts += 1
+        if not replaceable:
+            continue
+        target_count = 2 if len(replaceable) > 2 and rng.random() < .18 else 1
+        changed = 0
+        used = {hold_id for hold_id, _ in holds}
+        used_indexes = set()
+        for _ in range(target_count):
+            choices = [i for i in replaceable if i not in used_indexes]
+            if not choices:
+                break
+            index = rng.choice(choices)
+            role = holds[index][1]
+            new_id = replacement(role, holds[index][0], used)
+            if new_id is None:
+                continue
+            used.remove(holds[index][0])
+            used.add(new_id)
+            used_indexes.add(index)
+            holds[index][0] = new_id
+            changed += 1
+        key = signature(holds)
+        if not changed or key in seen_variations:
+            continue
+        movement_plan = plan(holds)
+        if not movement_plan:
+            continue
+        seen_variations.add(key)
+        seen_candidates.add(key)
+        grade_candidates.append({
+            "holds": holds,
+            "plan": movement_plan,
+            "source": {"grade": grade},
+            "changed": changed,
+        })
+
+    # Some grades have too few reachable novel variants. Fill their bucket
+    # with distinct, reach-checked community climbs from the same grade.
+    for template in templates:
+        if len(grade_candidates) >= target_per_grade:
+            break
+        holds = [[int(hold_id), int(role)] for hold_id, role in template["holds"]]
+        key = signature(holds)
+        if key in seen_candidates:
+            continue
+        movement_plan = plan(holds)
+        if not movement_plan:
+            continue
+        seen_candidates.add(key)
+        grade_candidates.append({
+            "holds": holds,
+            "plan": movement_plan,
+            "source": {"grade": grade},
+            "changed": 0,
+        })
+    if not grade_candidates:
+        raise SystemExit(f"Could not prepare any reachable routes for {grade}")
+    generated.extend(grade_candidates)
 
 data["generated"] = generated
 data_path.write_text(prefix + json.dumps(data, separators=(",", ":")) + ";\n")
-print(f"Prepared {len(generated)} novel, reach-checked problems from {len(data['routes'])} real TB2 climbs after {attempts} candidates")
+counts = Counter(candidate["source"]["grade"] for candidate in generated)
+print(f"Prepared {len(generated)} grade-conditioned problems ({dict(counts)}) from {len(data['routes'])} real TB2 climbs after {attempts} candidate variations")

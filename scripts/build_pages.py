@@ -1,17 +1,13 @@
 import json
 import hashlib
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 
 # Keep the large TB2 data and board images as separate same-origin resources.
-# This avoids an oversized inline script in the deployed page while retaining
-# the self-contained local build produced by build_standalone.py.
-subprocess.run([sys.executable, str(ROOT / "scripts/build_candidate_pool.py")], check=True)
+# The grade-conditioned model pool is prepared by train_diffusion.py.
 
 html = (ROOT / "index.shell.html").read_text()
 def cache_version(path):

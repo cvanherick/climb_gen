@@ -1,13 +1,8 @@
 import base64
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-# Always prepare the runtime-safe route pool before embedding the dataset. This
-# keeps the generated HTML independent of expensive in-browser route planning.
-subprocess.run([sys.executable, str(ROOT / "scripts/build_candidate_pool.py")], check=True)
 template = (ROOT / "index.shell.html").read_text()
 styles = (ROOT / "styles.css").read_text()
 dataset = (ROOT / "data/tb2-mirror-40.js").read_text()

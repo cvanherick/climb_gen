@@ -1,6 +1,6 @@
 # ClimbGen beta
 
-A simple one-button generator for a fixed 40° Tension Board 2 Mirror problem. ClimbGen has its own dark-and-lime interface; the board map uses the authentic TB2 Mirror hold artwork and public community climbs from the BoardLib dataset.
+A simple climb generator for a fixed 40° Tension Board 2 Mirror problem. Choose a grade from V0 to V11 or leave it on Any. ClimbGen has its own dark-and-lime interface; the board map uses the authentic TB2 Mirror hold artwork and public community climbs from the BoardLib dataset.
 
 ## Run locally
 
@@ -12,9 +12,13 @@ Run `python3 scripts/build_standalone.py` to create self-contained `index.html`,
 
 The database and placement images were downloaded using BoardLib’s documented public data flow. BoardLib extracts the bundled database from the Tension Board Android app and downloads layout images from the Board API; syncing newer rows requires a Tension account, so this bundled slice reflects the app database version available at acquisition time. See [BoardLib](https://github.com/lemeryfertitta/BoardLib).
 
-At build time, the candidate generator samples route structures from the community climbs, replaces one or two hand or foot placements with historically used nearby placements, rejects combinations already in the route pool, and keeps 120 combinations with a reachable hand sequence. The Generate button samples this prepared pool so it can return a problem immediately.
+## Grade-conditioned diffusion model
 
-The reach check is a simple 2D distance approximation. It does not model grip force, balance, collision, or a particular climber’s dimensions, so the sequence is a visualization of a possible beta rather than coaching advice.
+`scripts/train_diffusion.py` trains a PyTorch denoising diffusion model on the labeled TB2 40° community climbs. Each training example represents the board as four hold-role channels (start, hand, finish, and foot), and a learned grade embedding conditions denoising on V0–V11. The classifier-free grade guidance sampler generates new role grids; projected hold sets are then checked for route novelty and a reachable hand sequence. This produces a ready-to-use, grade-balanced browser pool in `data/tb2-mirror-40.js` and saves the trained checkpoint to `models/tb2-grade-diffusion.pt`.
+
+To retrain and refresh the app pool, install PyTorch and NumPy, then run `python3 scripts/train_diffusion.py --epochs 50`. To change the sampling volume, pass `--samples-per-grade N`. The GitHub Pages build uses the prepared pool and does not need PyTorch or retrain during deployment.
+
+The reach check is a simple 2D distance approximation. It does not model grip force, balance, collision, or a particular climber’s dimensions, so the sequence is a visualization of a possible beta rather than coaching advice. For grades where the sampler yields too few novel reachable routes, the pool is topped up with distinct reachable TB2 routes of the requested grade; these remain labeled as dataset routes in the app data.
 
 ## Deploy with GitHub Pages
 

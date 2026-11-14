@@ -97,7 +97,10 @@
     // Candidate generation and reach checking happen at build time. Keeping the
     // click path to a single array lookup avoids a long-running planner freezing
     // the page or leaving the Generate button stuck in its busy state.
-    const pool = dataset.generated;
+    const targetGrade = $('grade-select').value;
+    const pool = targetGrade === 'any'
+      ? dataset.generated
+      : dataset.generated.filter((candidate) => candidate.source.grade === targetGrade);
     if (!Array.isArray(pool) || pool.length === 0) throw new Error('No prepared TB2 problems are bundled');
     const candidate = pool[Math.floor(Math.random() * pool.length)];
     if (!Array.isArray(candidate.holds) || !Array.isArray(candidate.plan)) throw new Error('Prepared TB2 problem is invalid');
@@ -112,7 +115,7 @@
     generatedCount++;
     $('route-title').textContent = `Problem ${String(generatedCount).padStart(2, '0')}`;
     $('route-grade').textContent = `40° · ≈${problem.source.grade}`;
-    $('route-copy').textContent = `${problem.holds.length} holds · ${problem.plan.length} moves`;
+    $('route-copy').textContent = `${problem.holds.length} holds · ${problem.plan.length} moves · ${problem.source.grade}`;
     $('hold-count').textContent = problem.holds.length;
     $('move-count').textContent = problem.plan.length;
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
