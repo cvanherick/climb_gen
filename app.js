@@ -410,9 +410,10 @@
       objectUrl = URL.createObjectURL(selected);
       image.onload = () => {
         image.hidden = false; $('photo-empty').hidden = true; stage.classList.add('has-photo');
-        status.textContent = 'Photo loaded locally. Detecting holds on this device…';
-        $('photo-detection-status').textContent = 'Detecting on device…';
-        autoDetectHolds();
+        status.textContent = 'Photo loaded locally. Mark the four wall corners; hold detection will run inside that area.';
+        $('photo-detection-status').textContent = 'Mark wall corners';
+        setMode('calibrate');
+        draw();
       };
       image.onerror = () => { status.textContent = 'That image could not be opened. Choose another photo.'; };
       image.src = objectUrl;
