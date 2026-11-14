@@ -8,16 +8,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=7d48ae52a57b" />
+    <link rel="stylesheet" href="./styles.css?v=dd966f285a89" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <a class="brand" href="#" aria-label="ClimbGen"><span class="brand-mark"><i></i><i></i><i></i></span><span>climb<span>gen</span></span></a>
-        <div class="board-tag"><span class="tag-dot"></span> TENSION BOARD 2 <b>/</b> MIRROR <strong>40°</strong></div>
+        <a class="brand" id="brand-home" href="#" aria-label="ClimbGen home"><span class="brand-mark"><i></i><i></i><i></i></span><span>climb<span>gen</span></span></a>
+        <div class="board-tag" id="context-tag" hidden></div>
       </header>
 
       <main class="page">
+        <section id="home-screen" class="home-screen" aria-labelledby="home-title">
+          <div class="home-intro"><p class="eyebrow">CLIMBGEN <span>CHOOSE YOUR WALL</span></p><h1 id="home-title">Where are you<br /><em>climbing?</em></h1><p>Choose a wall to generate your next sequence.</p></div>
+          <div class="home-options">
+            <button id="home-tb2" class="home-choice" type="button"><span class="home-choice-index">01 / FIXED BOARD</span><strong>Tension Board 2</strong><small>Generate a 40° Mirror climb from the TB2 dataset.</small><span class="home-choice-arrow">↗</span></button>
+            <button id="home-photo" class="home-choice photo" type="button"><span class="home-choice-index">02 / YOUR WALL</span><strong>Upload a wall photo</strong><small>Detect holds, choose a start, and build a sequence.</small><span class="home-choice-arrow">↗</span></button>
+          </div>
+        </section>
+
+        <section id="tb2-view" class="app-view" hidden>
+          <button id="tb2-home" class="back-home" type="button">← All tools</button>
         <section class="intro-row">
           <div><p class="eyebrow">PROBLEM GENERATOR <span>01</span></p><h1>Find your next<br /><em>sequence.</em></h1><p class="intro-copy">Generate fresh variations from quality-rated TB2 climbs, on demand.</p></div>
           <div class="intro-controls">
@@ -56,10 +66,11 @@
             <div class="result-footer"><i></i> COMMUNITY DATA · 40° <span>BoardLib</span></div>
           </aside>
         </section>
+        </section>
       </main>
     </div>
-    <script src="./data/tb2-mirror-40.js?v=307f9bb626af"></script>
-    <script src="./route_generator.js?v=ab5fce80de95"></script><script src="./ik.js?v=fc65a012d9d7"></script><script src="./planner.js?v=e79c0052e4f7"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script>
-    <script src="./app.js?v=4c7dbf956ca3"></script>
+    <script src="./data/tb2-mirror-40.js?v=41d5d0502a0e"></script>
+    <script src="./route_generator.js?v=025c4d6f0212"></script><script src="./ik.js?v=fc65a012d9d7"></script><script src="./planner.js?v=e79c0052e4f7"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=e90b63d54bab"></script>
+    <script src="./app.js?v=45f3f94ec21a"></script>
   </body>
 </html>

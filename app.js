@@ -119,9 +119,9 @@
     currentProblem = problem;
     generatedCount++;
     $('route-title').textContent = problem.name;
-    $('route-grade').textContent = `40° · ≈${problem.source.grade}`;
+    $('route-grade').textContent = `40° · TARGET ${problem.source.grade}`;
     const baseLabel = problem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${problem.source.templateId}`;
-    $('route-copy').textContent = `${problem.holds.length} holds · fresh ${problem.source.grade} variation · based on ${baseLabel}`;
+    $('route-copy').textContent = `${problem.holds.length} holds · grade-conditioned ${problem.source.grade} variation · based on ${baseLabel}`;
     $('hold-count').textContent = problem.holds.length;
     $('move-count').textContent = '—';
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
@@ -272,16 +272,18 @@
 
   function initPhotoBuilder() {
     const main = document.querySelector('main.page');
-    const grid = main?.querySelector('.content-grid');
-    if (!grid) return;
-    grid.insertAdjacentHTML('afterend', `
+    if (!main) return;
+    main.insertAdjacentHTML('beforeend', `
+      <section id="photo-view" class="app-view" hidden>
+      <button id="photo-home" class="back-home" type="button">← All tools</button>
       <section class="photo-builder" aria-labelledby="photo-builder-title">
         <div class="photo-builder-heading"><div><p class="eyebrow">EXPERIMENTAL TOOL</p><h2 id="photo-builder-title">Build a sequence on your wall</h2><p>Upload a wall photo, mark holds, choose a start, then explore next-hold suggestions.</p></div><span class="photo-angle">PHOTO MODE</span></div>
-        <div class="photo-builder-controls"><label class="photo-upload">Choose wall photo<input id="photo-file" type="file" accept="image/*" /></label><div class="photo-tools"><button type="button" id="photo-calibrate-mode" class="photo-tool">Calibrate wall plane</button><button type="button" id="photo-mark-mode" class="photo-tool active">Mark holds</button><button type="button" id="photo-start-mode" class="photo-tool">Select start</button><button type="button" id="photo-reset-plane" class="photo-tool" disabled>Reset corners</button><button type="button" id="photo-undo" class="photo-tool" disabled>Undo</button><button type="button" id="photo-clear" class="photo-tool">Clear holds</button></div></div>
-        <div class="photo-analysis" aria-label="Photo analysis status"><div><span>WALL PLANE</span><b id="photo-plane-status">Not calibrated</b></div><div><span>USER-SET WALL ANGLE</span><b id="photo-angle-status">Unknown</b></div><div><span>HOLD DETECTION</span><b>Manual marking</b></div><p id="photo-analysis-note">Optionally mark four visible wall corners in order to rectify camera perspective. This does not estimate physical wall inclination or distance. You still mark holds yourself.</p></div>
+        <div class="photo-builder-controls"><label class="photo-upload">Choose wall photo<input id="photo-file" type="file" accept="image/*" /></label><div class="photo-tools"><button type="button" id="photo-detect" class="photo-tool photo-detect" disabled>Auto-detect holds</button><button type="button" id="photo-calibrate-mode" class="photo-tool">Calibrate wall plane</button><button type="button" id="photo-mark-mode" class="photo-tool active">Add missed holds</button><button type="button" id="photo-remove-mode" class="photo-tool">Remove false marks</button><button type="button" id="photo-start-mode" class="photo-tool">Select start</button><button type="button" id="photo-reset-plane" class="photo-tool" disabled>Reset corners</button><button type="button" id="photo-undo" class="photo-tool" disabled>Undo</button><button type="button" id="photo-clear" class="photo-tool">Clear holds</button></div></div>
+        <div class="photo-analysis" aria-label="Photo analysis status"><div><span>WALL PLANE</span><b id="photo-plane-status">Not calibrated</b></div><div><span>USER-SET WALL ANGLE</span><b id="photo-angle-status">Unknown</b></div><div><span>HOLD DETECTION</span><b id="photo-detection-status">Waiting for photo</b></div><p id="photo-analysis-note">The uploaded photo stays in this browser. Experimental color segmentation (not a trained detector) proposes hold outlines; review them, remove false marks, and add anything it missed.</p></div>
         <div class="photo-angle-control"><label for="photo-wall-type">Wall angle</label><select id="photo-wall-type"><option value="unknown">Unknown</option><option value="-10">Slab (approx.)</option><option value="0">Vertical</option><option value="40">Overhang (approx.)</option></select><label for="photo-wall-angle">Known degrees from vertical</label><input id="photo-wall-angle" type="number" min="-20" max="70" step="1" placeholder="Optional" /></div>
         <p id="photo-status" class="photo-status" aria-live="polite">Choose a photo to begin. Your image stays in this browser session.</p>
         <div class="photo-workspace"><div class="photo-preview"><div id="photo-stage" class="photo-stage"><img id="photo-image" alt="Uploaded climbing wall" hidden /><svg id="photo-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Clickable photo hold annotations"></svg><div id="photo-empty" class="photo-empty">Your wall photo will appear here</div></div></div><aside class="photo-sequence"><div class="photo-sequence-top"><h3>Sequence</h3><button type="button" id="photo-suggest" class="photo-suggest" disabled>Suggest next holds</button></div><ol id="photo-sequence-list"><li class="photo-sequence-empty">Select one marked hold as the start.</li></ol><div id="photo-choices" class="photo-choices"></div><p class="photo-disclaimer">Suggestions use marked photo positions and simple distance/progress heuristics. They are not generated by a trained photo model and do not verify reachability, hold quality, or safety.</p></aside></div>
+      </section>
       </section>`);
 
     const file = $('photo-file'), image = $('photo-image'), overlay = $('photo-overlay');
@@ -289,7 +291,7 @@
     const sequenceList = $('photo-sequence-list'), choices = $('photo-choices');
     const wallType = $('photo-wall-type'), wallAngle = $('photo-wall-angle');
     const holds = [], corners = [];
-    let sequence = [], mode = 'mark', objectUrl = null, finished = null, homography = null;
+    let sequence = [], mode = 'mark', objectUrl = null, finished = null, homography = null, detecting = false;
     const cornerNames = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
     function solveLinear(matrix, rhs) {
       const a = matrix.map((row, i) => [...row, rhs[i]]);
@@ -342,20 +344,24 @@
       $('photo-angle-status').textContent = selectedAngle == null ? 'Unknown' : `${selectedAngle}° ${selectedAngle > 0 ? 'overhang' : selectedAngle < 0 ? 'slab' : 'vertical'}`;
       if (homography) {
         $('photo-plane-status').textContent = 'Rectified from 4 corners';
-        $('photo-analysis-note').textContent = 'Hold positions are perspective-rectified inside the four marked corners. Physical wall angle and movement scale remain unknown; holds still require manual marking.';
+        $('photo-analysis-note').textContent = 'Hold positions are perspective-rectified inside the four marked corners. Physical wall angle and movement scale remain unknown. Review the detected outlines and correct them as needed.';
       } else {
         $('photo-plane-status').textContent = corners.length ? `${corners.length}/4 corners marked` : 'Not calibrated';
-        $('photo-analysis-note').textContent = 'Optionally mark four visible wall corners in order to rectify camera perspective. This does not estimate physical wall inclination or distance. You still mark holds yourself.';
+        $('photo-analysis-note').textContent = 'The uploaded photo stays in this browser. Experimental color segmentation (not a trained detector) proposes hold outlines; review them, remove false marks, and add anything it missed. Four-corner calibration corrects perspective but does not estimate physical wall inclination or distance.';
       }
     }
     const setMode = (next) => {
       mode = next;
       $('photo-calibrate-mode').classList.toggle('active', mode === 'calibrate');
       $('photo-mark-mode').classList.toggle('active', mode === 'mark');
+      $('photo-remove-mode').classList.toggle('active', mode === 'remove');
       $('photo-start-mode').classList.toggle('active', mode === 'start');
+      stage.classList.toggle('photo-remove-mode', mode === 'remove');
       status.textContent = mode === 'calibrate'
         ? `Tap wall corners in order: ${cornerNames[corners.length] || 'calibration complete'}.`
-        : mode === 'mark' ? 'Tap each visible hold in the photo to mark it.' : 'Tap one marked hold to set or change the start.';
+        : mode === 'mark' ? 'Tap the center of any missed hold to add it.'
+          : mode === 'remove' ? 'Tap a false detected hold to remove it.'
+            : 'Tap one detected hold to select the start.';
     };
     const draw = () => {
       overlay.replaceChildren();
@@ -370,7 +376,11 @@
         });
       }
       holds.forEach((hold, index) => {
-        const circle = svgEl('circle', { cx: hold.x, cy: hold.y, r: 1.45, class: `photo-hold-dot${sequence.includes(index) ? ' in-sequence' : ''}${sequence[0] === index ? ' photo-start-dot' : ''}`, 'data-index': index });
+        if (Array.isArray(hold.polygon) && hold.polygon.length >= 3) {
+          const polygon = svgEl('polygon', { points: hold.polygon.map((p) => `${p.x},${p.y}`).join(' '), class: `photo-hold-outline${hold.source === 'auto' ? ' detected' : ' manual'}`, 'data-index': index });
+          overlay.append(polygon);
+        }
+        const circle = svgEl('circle', { cx: hold.x, cy: hold.y, r: 1.45, class: `photo-hold-dot${sequence.includes(index) ? ' in-sequence' : ''}${sequence[0] === index ? ' photo-start-dot' : ''}${hold.source === 'auto' ? ' auto-detected' : ''}`, 'data-index': index });
         const label = svgEl('text', { x: hold.x, y: hold.y + .45, class: 'photo-hold-label', 'text-anchor': 'middle', 'pointer-events': 'none' });
         label.textContent = String(index + 1);
         overlay.append(circle, label);
@@ -390,7 +400,9 @@
         if (!sequence.includes(finished)) finished = null;
         choices.replaceChildren(); draw();
       }));
-      $('photo-undo').disabled = holds.length === 0;
+      $('photo-undo').disabled = holds.length === 0 || detecting;
+      $('photo-detect').disabled = image.hidden || detecting;
+      $('photo-detect').textContent = detecting ? 'Detecting…' : 'Auto-detect holds';
       suggest.disabled = !sequence.length || holds.length < 2 || finished != null;
       suggest.textContent = finished == null ? 'Suggest next holds' : 'Sequence finished';
       updatePlaneStatus();
@@ -400,7 +412,12 @@
       if (!selected) return;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = URL.createObjectURL(selected);
-      image.onload = () => { image.hidden = false; $('photo-empty').hidden = true; stage.classList.add('has-photo'); status.textContent = 'Photo loaded locally. Optionally calibrate its visible wall plane, then mark holds manually.'; };
+      image.onload = () => {
+        image.hidden = false; $('photo-empty').hidden = true; stage.classList.add('has-photo');
+        status.textContent = 'Photo loaded locally. Detecting holds on this device…';
+        $('photo-detection-status').textContent = 'Detecting on device…';
+        autoDetectHolds();
+      };
       image.onerror = () => { status.textContent = 'That image could not be opened. Choose another photo.'; };
       image.src = objectUrl;
       holds.length = 0; corners.length = 0; homography = null; sequence = []; finished = null; setMode('mark'); choices.replaceChildren(); draw();
@@ -424,24 +441,89 @@
           }
         } else status.textContent = `Corner ${corners.length} marked. Next: ${cornerNames[corners.length]}.`;
       } else if (mode === 'mark') {
-        holds.push({ x, y });
+        holds.push({ x, y, source: 'manual' });
         status.textContent = `${holds.length} hold${holds.length === 1 ? '' : 's'} marked.`;
       } else {
-        const circle = event.target.closest('circle[data-index]');
-        if (!circle) { status.textContent = 'Tap a marked hold to select the start.'; return; }
-        sequence = [Number(circle.dataset.index)]; finished = null; choices.replaceChildren();
+        const mark = event.target.closest('[data-index]');
+        if (!mark) { status.textContent = mode === 'remove' ? 'Tap a detected outline or mark to remove it.' : 'Tap one detected hold to select the start.'; return; }
+        const index = Number(mark.dataset.index);
+        if (mode === 'remove') {
+          removeHold(index);
+          status.textContent = 'Hold mark removed. Select another false mark or switch modes.';
+          draw();
+          return;
+        }
+        sequence = [index]; finished = null; choices.replaceChildren();
         status.textContent = `Hold ${sequence[0] + 1} selected as the start.`;
       }
       draw();
     });
     $('photo-calibrate-mode').addEventListener('click', () => { if (!image.src || image.hidden) { status.textContent = 'Choose a wall photo before calibrating its plane.'; return; } if (corners.length >= 4) { status.textContent = 'Reset the corners to calibrate again.'; return; } setMode('calibrate'); });
     $('photo-mark-mode').addEventListener('click', () => setMode('mark'));
+    $('photo-remove-mode').addEventListener('click', () => setMode('remove'));
     $('photo-start-mode').addEventListener('click', () => setMode('start'));
     $('photo-reset-plane').addEventListener('click', () => { corners.length = 0; homography = null; choices.replaceChildren(); draw(); setMode('calibrate'); });
     const clearSuggestions = () => { choices.replaceChildren(); };
     const updateAngle = () => { clearSuggestions(); updatePlaneStatus(); };
     wallType.addEventListener('change', updateAngle);
     wallAngle.addEventListener('input', updateAngle);
+    function removeHold(index) {
+      if (index < 0 || index >= holds.length) return;
+      holds.splice(index, 1);
+      const routePosition = sequence.indexOf(index);
+      if (routePosition >= 0) {
+        sequence = sequence.slice(0, routePosition);
+        finished = null;
+      } else {
+        sequence = sequence.map((value) => value > index ? value - 1 : value);
+        if (finished === index) finished = null;
+        else if (finished > index) finished--;
+      }
+      choices.replaceChildren();
+    }
+    async function autoDetectHolds() {
+      if (!image.src || image.hidden) return;
+      const detector = window.ClimbGenPhotoDetector;
+      if (!detector?.detect) {
+        $('photo-detection-status').textContent = 'Detector unavailable';
+        status.textContent = 'Automatic hold detection is unavailable in this build. Add missed holds manually.';
+        return;
+      }
+      detecting = true;
+      $('photo-detect').disabled = true;
+      $('photo-detect').textContent = 'Detecting…';
+      $('photo-detection-status').textContent = 'Detecting on device…';
+      status.textContent = 'Scanning the photo for hold outlines…';
+      try {
+        const result = await detector.detect(image, { maxCandidates: 300 });
+        const detected = Array.isArray(result?.candidates) ? result.candidates
+          : Array.isArray(result?.holds) ? result.holds
+            : Array.isArray(result) ? result : [];
+        const autoHolds = detected.filter((hold) => Number.isFinite(Number(hold.x)) && Number.isFinite(Number(hold.y)))
+          .map((hold) => ({ ...hold, x: Math.max(0, Math.min(100, Number(hold.x))), y: Math.max(0, Math.min(100, Number(hold.y))), source: 'auto' }));
+        const manualHolds = holds.filter((hold) => hold.source !== 'auto');
+        holds.splice(0, holds.length, ...manualHolds, ...autoHolds);
+        sequence = [];
+        finished = null;
+        choices.replaceChildren();
+        if (!autoHolds.length) {
+          $('photo-detection-status').textContent = 'No holds found';
+          status.textContent = 'No hold candidates were found. Add holds manually or try a clearer, straighter-on photo.';
+        } else {
+          const confidenceValues = autoHolds.map((hold) => Number(hold.confidence)).filter(Number.isFinite);
+          const average = confidenceValues.length ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length : null;
+          $('photo-detection-status').textContent = `${autoHolds.length} candidates${result?.method ? ` · ${result.method}` : ''}`;
+          status.textContent = `Detected ${autoHolds.length} candidate holds${average == null ? '' : ` · ${Math.round(average * 100)}% average confidence`}. Review outlines, remove false marks, and add missed holds. This is local experimental color segmentation, not a trained detector.${result?.note ? ` ${result.note}` : ''}`;
+        }
+      } catch (error) {
+        $('photo-detection-status').textContent = 'Detection failed';
+        status.textContent = `Could not detect holds in this image. Add holds manually or choose another photo.${error?.message ? ` (${error.message})` : ''}`;
+      } finally {
+        detecting = false;
+        draw();
+      }
+    }
+    $('photo-detect').addEventListener('click', autoDetectHolds);
     $('photo-undo').addEventListener('click', () => {
       const removed = holds.length - 1;
       holds.pop(); sequence = sequence.filter((index) => index !== removed); if (!sequence.includes(finished)) finished = null; choices.replaceChildren(); draw();
@@ -481,7 +563,23 @@
     });
   }
 
+  function setActiveView(view) {
+    $('home-screen').hidden = view !== 'home';
+    $('tb2-view').hidden = view !== 'tb2';
+    $('photo-view').hidden = view !== 'photo';
+    const context = $('context-tag');
+    context.hidden = view === 'home';
+    context.textContent = view === 'tb2' ? 'TENSION BOARD 2 · 40° MIRROR' : 'PHOTO WALL · LOCAL';
+    if (view === 'photo') $('photo-file').focus({ preventScroll: true });
+  }
+
+  $('brand-home').addEventListener('click', (event) => { event.preventDefault(); setActiveView('home'); });
+  $('home-tb2').addEventListener('click', () => setActiveView('tb2'));
+  $('home-photo').addEventListener('click', () => setActiveView('photo'));
   initPhotoBuilder();
+  $('tb2-home').addEventListener('click', () => setActiveView('home'));
+  $('photo-home').addEventListener('click', () => setActiveView('home'));
+  setActiveView('home');
   $('generate-button').addEventListener('click', makeProblem);
   try {
     dataset = window.CLIMBGEN_DATA;

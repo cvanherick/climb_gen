@@ -144,6 +144,56 @@ def movement_plan(holds, positions):
     return visit(left_start, right_start, tuple(middle), None)
 
 
+def route_passes_app_quality(holds, positions):
+    """Keep diffusion samples inside the same structural limits as the app."""
+    starts = [positions[int(i)] for i, role in holds if int(role) == 5]
+    hands = [positions[int(i)] for i, role in holds if int(role) == 6]
+    finishes = [positions[int(i)] for i, role in holds if int(role) == 7]
+    feet = [positions[int(i)] for i, role in holds if int(role) == 8]
+    if not 1 <= len(starts) <= 2 or not 3 <= len(hands) <= 5 or len(finishes) != 1 or not feet:
+        return False
+    start_y = sum(p["y"] for p in starts) / len(starts)
+    finish_y = finishes[0]["y"]
+    all_hands = starts + hands + finishes
+    if any(p["y"] > 44 for p in starts):
+        return False
+    if len(starts) > 1 and math.dist((starts[0]["x"], starts[0]["y"]), (starts[1]["x"], starts[1]["y"])) > 40:
+        return False
+    if finish_y - start_y < 24:
+        return False
+    if max(p["y"] for p in all_hands) - min(p["y"] for p in all_hands) < 48:
+        return False
+    if sum(p["y"] < start_y - 10 for p in hands) > 1:
+        return False
+    if any(min(math.dist((p["x"], p["y"]), (q["x"], q["y"])) for q in all_hands if q is not p) > 36 for p in hands):
+        return False
+
+    finish = finishes[0]
+    initial_y = start_y
+    memo = set()
+
+    def reaches(left, right, remaining, last_y):
+        if not remaining:
+            return min(math.dist((left["x"], left["y"]), (finish["x"], finish["y"])),
+                       math.dist((right["x"], right["y"]), (finish["x"], finish["y"]))) <= 36 and finish["y"] >= initial_y + 20 and finish["y"] >= last_y - 20
+        key = (left["id"], right["id"], tuple(sorted(p["id"] for p in remaining)), round(last_y / 8))
+        if key in memo:
+            return False
+        memo.add(key)
+        for target in remaining:
+            if target["y"] < last_y - 20:
+                continue
+            rest = [p for p in remaining if p is not target]
+            if math.dist((left["x"], left["y"]), (target["x"], target["y"])) <= 36 and reaches(target, right, rest, target["y"]):
+                return True
+            if math.dist((right["x"], right["y"]), (target["x"], target["y"])) <= 36 and reaches(left, target, rest, target["y"]):
+                return True
+        return False
+
+    left, right = sorted(starts, key=lambda p: p["x"])[0], sorted(starts, key=lambda p: p["x"])[-1]
+    return reaches(left, right, hands, initial_y)
+
+
 def route_tensor(route, hold_index):
     value = np.zeros((len(hold_index), len(ROLE_ORDER)), dtype=np.float32)
     for hold_id, role in route["holds"]:
@@ -175,6 +225,55 @@ def route_holds_from_scores(scores, counts, placements, rng):
     return holds
 
 
+def project_scores_onto_route(scores, reference, placements, rng, grade_frequency):
+    """Project model scores onto a grade-matched, climb-shaped route.
+
+    Independent per-hold argmaxes often create disconnected sets. Starting
+    from a real route of the requested grade preserves its hold-count and
+    movement shape while diffusion scores choose the new contacts.
+    """
+    scores = np.asarray(scores, dtype=np.float32).reshape(len(placements), len(ROLE_ORDER))
+    hold_index = {int(hold["id"]): index for index, hold in enumerate(placements)}
+    holds = [[int(i), int(role)] for i, role in reference["holds"]]
+    mutable = [index for index, (_, role) in enumerate(holds) if role in (6, 8)]
+    if not mutable:
+        return None
+    edit_count = min(len(mutable), 1 + int(rng.integers(0, 3)))
+    edit_order = list(rng.permutation(mutable)[:edit_count])
+    used = {str(hold_id) for hold_id, _ in holds}
+    changed = 0
+    for route_index in edit_order:
+        old_id, role = holds[route_index]
+        old = placements[hold_index[old_id]]
+        channel = ROLE_TO_CHANNEL[role]
+        candidates = []
+        for placement_index, candidate in enumerate(placements):
+            candidate_id = str(candidate["id"])
+            if candidate_id in used:
+                continue
+            distance = math.hypot(candidate["x"] - old["x"], candidate["y"] - old["y"])
+            if not 4 <= distance <= 24:
+                continue
+            # Dataset frequency is a light prior; the requested-grade
+            # diffusion score remains the main signal for a replacement.
+            count = grade_frequency.get(role, {}).get(candidate_id, 0)
+            score = float(scores[placement_index, channel]) + 0.12 * math.log1p(count)
+            candidates.append((score, candidate_id, int(candidate["id"])))
+        if not candidates:
+            continue
+        candidates.sort(reverse=True)
+        shortlist = candidates[:32]
+        logits = np.asarray([row[0] for row in shortlist], dtype=np.float64)
+        logits = np.exp(np.clip((logits - logits.max()) / 0.35, -30, 0))
+        choice = int(rng.choice(len(shortlist), p=logits / logits.sum()))
+        replacement_id = shortlist[choice][2]
+        used.remove(str(old_id))
+        used.add(str(replacement_id))
+        holds[route_index] = [replacement_id, role]
+        changed += 1
+    return (holds, changed) if changed else None
+
+
 def train_model(data, epochs, seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -195,9 +294,17 @@ def train_model(data, epochs, seed):
 
     x = np.stack([route_tensor(route, hold_index) for route in routes])
     grades = np.asarray([GRADES.index(route["grade"]) for route in routes], dtype=np.int64)
-    permutation = np.random.permutation(len(routes))
-    validation_size = max(1, round(len(routes) * 0.1))
-    validation_idx, training_idx = permutation[:validation_size], permutation[validation_size:]
+    # Split each grade separately. A single global random split can leave rare
+    # grades (especially V0/V1/V11) with almost no validation examples.
+    training_parts, validation_parts = [], []
+    for grade_index in range(len(GRADES)):
+        grade_indices = np.flatnonzero(grades == grade_index)
+        np.random.shuffle(grade_indices)
+        validation_size = max(1, round(len(grade_indices) * 0.1))
+        validation_parts.extend(grade_indices[:validation_size].tolist())
+        training_parts.extend(grade_indices[validation_size:].tolist())
+    training_idx = np.asarray(training_parts, dtype=np.int64)
+    validation_idx = np.asarray(validation_parts, dtype=np.int64)
     x_train = torch.tensor(x[training_idx], device=device)
     g_train = torch.tensor(grades[training_idx], device=device)
     x_valid = torch.tensor(x[validation_idx], device=device)
@@ -214,8 +321,7 @@ def train_model(data, epochs, seed):
 
     def evaluate():
         model.eval()
-        total_loss = 0.0
-        seen = 0
+        losses_by_grade = defaultdict(list)
         with torch.no_grad():
             for start in range(0, len(x_valid), batch_size):
                 clean = x_valid[start:start + batch_size]
@@ -225,14 +331,32 @@ def train_model(data, epochs, seed):
                 a = alpha_bar[t - 1].unsqueeze(1)
                 noisy = a.sqrt() * clean + (1 - a).sqrt() * noise
                 prediction = model(noisy, t, grade)
-                loss = F.mse_loss(prediction, noise)
-                total_loss += float(loss) * len(clean)
-                seen += len(clean)
-        return total_loss / max(seen, 1)
+                per_example_loss = (prediction - noise).square().mean(dim=1)
+                for grade_index in range(len(GRADES)):
+                    mask = grade == grade_index
+                    if mask.any():
+                        losses_by_grade[grade_index].extend(per_example_loss[mask].cpu().tolist())
+        per_grade = {
+            GRADES[index]: float(np.mean(values))
+            for index, values in losses_by_grade.items()
+        }
+        # Macro-average prevents the most common grades from deciding which
+        # checkpoint is kept.
+        return float(np.mean(list(per_grade.values()))), per_grade
+
+    train_grade_counts = np.bincount(grades[training_idx], minlength=len(GRADES))
+    grade_sample_weights = 1.0 / np.sqrt(train_grade_counts[grades[training_idx]].astype(np.float64))
+    grade_sample_weights /= grade_sample_weights.sum()
 
     for epoch in range(1, epochs + 1):
         model.train()
-        order = torch.randperm(len(x_train), device=device)
+        # Mild inverse-square-root reweighting gives underrepresented grades
+        # more gradient updates without repeatedly cloning the rarest routes
+        # as aggressively as strict class balancing would.
+        order = torch.multinomial(
+            torch.as_tensor(grade_sample_weights, dtype=torch.double),
+            len(x_train), replacement=True,
+        )
         total_loss = 0.0
         batches = 0
         for start in range(0, len(order), batch_size):
@@ -255,21 +379,21 @@ def train_model(data, epochs, seed):
             total_loss += float(loss)
             batches += 1
 
-        validation_loss = evaluate()
+        validation_loss, validation_by_grade = evaluate()
         if validation_loss < best_validation:
             best_validation = validation_loss
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
         if epoch == 1 or epoch % 10 == 0 or epoch == epochs:
-            print(f"epoch {epoch:03d}/{epochs} train_noise_loss={total_loss / max(batches, 1):.4f} val_noise_loss={validation_loss:.4f}")
+            print(f"epoch {epoch:03d}/{epochs} train_noise_loss={total_loss / max(batches, 1):.4f} val_grade_macro_loss={validation_loss:.4f}")
 
     if best_state is not None:
         model.load_state_dict(best_state)
     model.eval()
-    return model, routes_by_grade, hold_index, betas, alphas, alpha_bar, best_validation
+    return model, routes_by_grade, hold_index, betas, alphas, alpha_bar, best_validation, train_grade_counts
 
 
 @torch.no_grad()
-def sample_diffusion(model, grades, betas, alphas, alpha_bar, hold_count, guidance=1.5):
+def sample_diffusion(model, grades, betas, alphas, alpha_bar, hold_count, guidance=2.2):
     device = next(model.parameters()).device
     grades_tensor = torch.tensor([GRADES.index(g) for g in grades], dtype=torch.long, device=device)
     state = torch.randn(len(grades), hold_count * len(ROLE_ORDER), device=device)
@@ -293,13 +417,13 @@ def sample_diffusion(model, grades, betas, alphas, alpha_bar, hold_count, guidan
 def main():
     parser = argparse.ArgumentParser(description="Train the TB2 grade-conditional diffusion model and regenerate the app pool")
     parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--samples-per-grade", type=int, default=40)
+    parser.add_argument("--samples-per-grade", type=int, default=300)
     parser.add_argument("--seed", type=int, default=180)
     parser.add_argument("--model-path", type=Path, default=MODEL_PATH)
     args = parser.parse_args()
 
     data = load_data()
-    model, routes_by_grade, hold_index, betas, alphas, alpha_bar, validation_loss = train_model(data, args.epochs, args.seed)
+    model, routes_by_grade, hold_index, betas, alphas, alpha_bar, validation_loss, train_grade_counts = train_model(data, args.epochs, args.seed)
     args.model_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
         "state_dict": model.state_dict(),
@@ -309,6 +433,8 @@ def main():
         "hold_count": len(data["placements"]),
         "validation_noise_loss": validation_loss,
         "training_routes": sum(len(routes_by_grade[grade]) for grade in GRADES),
+        "training_routes_by_grade": {grade: int(train_grade_counts[index]) for index, grade in enumerate(GRADES)},
+        "grade_conditioning": "learned grade embedding with classifier-free dropout; inverse-sqrt grade sampling",
         "seed": args.seed,
     }, args.model_path)
 
@@ -316,19 +442,31 @@ def main():
     sample_grades = [grade for grade in GRADES for _ in range(args.samples_per_grade)]
     sampled_scores = sample_diffusion(model, sample_grades, betas, alphas, alpha_bar, len(data["placements"]))
     positions = {int(hold["id"]): hold for hold in data["placements"]}
+    reference_routes = {
+        grade: [route for route in routes_by_grade[grade]
+                if route_passes_app_quality(route["holds"], positions)
+                and movement_plan(route["holds"], positions)]
+        for grade in GRADES
+    }
+    grade_frequency = defaultdict(lambda: defaultdict(Counter))
+    for grade in GRADES:
+        for route in reference_routes[grade]:
+            for hold_id, role in route["holds"]:
+                grade_frequency[grade][int(role)][str(int(hold_id))] += 1
+    placement_by_id = {int(hold["id"]): hold for hold in data["placements"]}
     original_signatures = {signature(route["holds"]) for route in data["routes"]}
     generated_signatures = set()
-    existing_by_grade = defaultdict(list)
-    for candidate in data.get("generated", []):
-        existing_by_grade[candidate.get("source", {}).get("grade")].append(candidate)
-
     model_by_grade = defaultdict(list)
     for score, grade in zip(sampled_scores, sample_grades):
-        grade_routes = routes_by_grade[grade]
+        grade_routes = reference_routes[grade]
+        if not grade_routes:
+            continue
         reference = random.choice(grade_routes)
-        counts = {role: sum(int(role_id) == role for _, role_id in reference["holds"]) for role in ROLE_ORDER}
-        holds = route_holds_from_scores(score, counts, data["placements"], rng)
-        if not holds:
+        projected = project_scores_onto_route(score, reference, data["placements"], rng, grade_frequency[grade])
+        if not projected:
+            continue
+        holds, changed = projected
+        if not route_passes_app_quality(holds, positions):
             continue
         key = signature(holds)
         if key in original_signatures or key in generated_signatures:
@@ -341,25 +479,19 @@ def main():
             "holds": holds,
             "plan": plan,
             "source": {"grade": grade},
-            "changed": len(holds),
+            "changed": changed,
             "generator": "grade-conditional-ddpm",
         })
 
-    # Put diffusion samples first in every target-grade bucket, then top up with
-    # reach-checked historical/perturbed TB2 examples if the sampler is sparse.
+    # Keep only candidates from this checkpoint. Reusing the previous pool
+    # would mix old model samples with the newly balanced grade conditioning.
+    # Fill sparse buckets with clearly identified real examples, not stale
+    # diffusion output.
     conditioned_pool = []
     counts_by_grade = {}
     for grade in GRADES:
-        bucket = model_by_grade[grade][:5]
+        bucket = model_by_grade[grade][:8]
         signatures = {signature(candidate["holds"]) for candidate in bucket}
-        for candidate in existing_by_grade[grade]:
-            if len(bucket) >= 10:
-                break
-            key = signature(candidate["holds"])
-            if key in signatures:
-                continue
-            signatures.add(key)
-            bucket.append(candidate)
         if len(bucket) < 10:
             for route in routes_by_grade[grade]:
                 if len(bucket) >= 10:
@@ -392,6 +524,8 @@ def main():
         "grades": GRADES,
         "diffusion_routes_by_grade": counts_by_grade,
         "model_sha256": hashlib.sha256(args.model_path.read_bytes()).hexdigest(),
+        "grade_conditioning": "learned grade embedding; macro validation; inverse-sqrt grade sampling; CFG scale 2.2",
+        "training_routes_by_grade": {grade: int(train_grade_counts[index]) for index, grade in enumerate(GRADES)},
     }
     DATA_PATH.write_text(PREFIX + json.dumps(data, separators=(",", ":")) + ";\n")
     print(f"Saved checkpoint: {args.model_path}")

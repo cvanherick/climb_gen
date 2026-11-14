@@ -60,19 +60,21 @@
   }
   function create(data, options = {}) {
     const placements = new Map(data.placements.map((p) => [String(p.id), p]));
-    const frequency = { 6: new Map(), 8: new Map() };
+    const frequencyByGrade = new Map();
     const routesByGrade = new Map();
     for (const route of data.routes) {
-      if (!route.grade || !Array.isArray(route.holds)) continue;
+      if (!/^V(?:[0-9]|10|11)$/.test(route.grade || '') || !Array.isArray(route.holds)) continue;
       if (!routesByGrade.has(route.grade)) routesByGrade.set(route.grade, []);
       if (Number(route.quality || 0) < (options.minCommunityQuality ?? 2.4) || Number(route.ascents || 0) < 3) continue;
       if (!assess(route.holds, placements).ok) continue;
       route.templateKind = 'community';
       routesByGrade.get(route.grade).push(route);
-      for (const [id, role] of route.holds) if (frequency[role]) frequency[role].set(String(id), (frequency[role].get(String(id)) || 0) + 1);
+      if (!frequencyByGrade.has(route.grade)) frequencyByGrade.set(route.grade, { 6: new Map(), 8: new Map() });
+      const gradeFrequency = frequencyByGrade.get(route.grade);
+      for (const [id, role] of route.holds) if (gradeFrequency[role]) gradeFrequency[role].set(String(id), (gradeFrequency[role].get(String(id)) || 0) + 1);
     }
     for (const candidate of data.generated || []) {
-      if (candidate.generator !== 'grade-conditional-ddpm' || !candidate.source?.grade || !assess(candidate.holds, placements).ok) continue;
+      if (candidate.generator !== 'grade-conditional-ddpm' || !/^V(?:[0-9]|10|11)$/.test(candidate.source?.grade || '') || !assess(candidate.holds, placements).ok) continue;
       if (!routesByGrade.has(candidate.source.grade)) routesByGrade.set(candidate.source.grade, []);
       routesByGrade.get(candidate.source.grade).push({ id: `ddpm-${signature(candidate.holds).slice(0, 12)}`, grade: candidate.source.grade, holds: candidate.holds, quality: 2.4, ascents: 3, templateKind: 'ddpm' });
     }
@@ -93,11 +95,14 @@
       const chosenGrade = grade === 'any' ? grades[Math.floor(rng() * grades.length)] : grade;
       const templates = routesByGrade.get(chosenGrade) || [];
       if (!templates.length) throw new Error(`No quality-checked TB2 templates for ${chosenGrade}`);
+      const gradeFrequency = frequencyByGrade.get(chosenGrade) || { 6: new Map(), 8: new Map() };
       // Try many local variants before moving to another highly-rated template.
       for (let attempt = 0; attempt < (options.attempts ?? 900); attempt++) {
         const communityTemplates = templates.filter((r) => r.templateKind !== 'ddpm').slice(0, Math.max(30, Math.ceil(templates.filter((r) => r.templateKind !== 'ddpm').length * 0.75)));
         const modelTemplates = templates.filter((r) => r.templateKind === 'ddpm');
-        const template = weightedPick([...communityTemplates, ...modelTemplates], (r) => (Number(r.quality || 2.4) + 0.25) ** 2 * Math.log2(Number(r.ascents || 3) + 2) * (r.templateKind === 'ddpm' ? 1.5 : 1), rng);
+        const useModelSeed = modelTemplates.length > 0 && (communityTemplates.length === 0 || rng() < (options.diffusionSeedRate ?? 0.7));
+        const seedPool = useModelSeed ? modelTemplates : communityTemplates;
+        const template = weightedPick(seedPool, (r) => (Number(r.quality || 2.4) + 0.25) ** 2 * Math.log2(Number(r.ascents || 3) + 2), rng);
         const holds = template.holds.map(([id, role]) => [Number(id), Number(role)]);
         const mutable = holds.map((pair, index) => ({ pair, index })).filter(({ pair }) => pair[1] === roles.hand || pair[1] === roles.foot);
         if (!mutable.length) continue;
@@ -117,7 +122,7 @@
         for (const { pair, index } of chosen) {
           const old = placements.get(String(pair[0]));
           const role = pair[1];
-          const candidates = [...(frequency[role] || new Map()).entries()].map(([id, count]) => {
+          const candidates = [...(gradeFrequency[role] || new Map()).entries()].map(([id, count]) => {
             const p = placements.get(id);
             const d = p ? Math.hypot(p.x - old.x, p.y - old.y) : Infinity;
             return { id: Number(id), count, d, p };
@@ -133,7 +138,7 @@
         const key = signature(holds);
         if (seen.has(key) || !assess(holds, placements).ok) continue;
         seen.add(key);
-        return { holds, source: { grade: chosenGrade, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0) }, changed, signature: key, generatedOnDemand: true };
+        return { holds, grade: chosenGrade, source: { grade: chosenGrade, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true };
       }
       throw new Error(`Could not find a new quality-checked ${chosenGrade} variant after ${options.attempts ?? 900} attempts. Generate again.`);
     }
