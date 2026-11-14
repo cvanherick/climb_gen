@@ -213,13 +213,24 @@
     const rightFoot = orderedFeet.find((p) => p.x >= centerX && p.id !== leftFoot.id) || orderedFeet.find((p) => p.id !== leftFoot.id) || rightFootFallback();
     function rightFootFallback() { return orderedFeet[0] || rightStart; }
     const contacts = { leftHand: leftStart, rightHand: rightStart, leftFoot, rightFoot };
+    const plannedFootPositions = { leftFoot, rightFoot };
     const steps = [];
     const handSteps = problem.plan.filter((s) => s.role !== 7);
     const finish = problem.plan.find((s) => s.role === 7);
-    for (const step of handSteps) steps.push({ limb: limbFor(step.limb), id: step.id, role: step.role });
-    const plantedFeet = new Set([leftFoot.id, rightFoot.id]);
-    const nextFeet = feet.filter((p) => !plantedFeet.has(p.id)).sort((a, b) => a.y - b.y);
-    for (const foot of nextFeet) steps.push({ limb: foot.x < centerX ? 'leftFoot' : 'rightFoot', id: foot.id, role: 8 });
+    const handPositions = { leftHand: leftStart, rightHand: rightStart };
+    for (const step of handSteps) {
+      const limb = limbFor(step.limb), released = handPositions[limb];
+      steps.push({ limb, id: step.id, role: step.role });
+      handPositions[limb] = posOf(step.id);
+      const stillHeld = Object.entries(handPositions).some(([other, p]) => other !== limb && p.id === released.id);
+      if (!stillHeld) {
+        const footLimb = released.x <= centerX ? 'leftFoot' : 'rightFoot';
+        if (plannedFootPositions[footLimb].id !== released.id) {
+          steps.push({ limb: footLimb, id: released.id, role: 8 });
+          plannedFootPositions[footLimb] = released;
+        }
+      }
+    }
     if (finish) steps.push({ limb: limbFor(finish.limb), id: finish.id, role: 7 });
     return { contacts, steps, torso: { x: centerX, y: centerY } };
   }
