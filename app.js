@@ -91,16 +91,27 @@
   function routeHolds(record) {
     return record.holds.map(([id, role]) => ({ id, role }));
   }
-  function sampleProblem() {
+  async function sampleProblem() {
     const targetGrade = $('grade-select').value;
     const typedName = $('climb-name').value.trim();
     const climbName = typedName || `Climb ${String(generatedCount + 1).padStart(2, '0')}`;
-    const candidate = routeGenerator.generate({ grade: targetGrade, name: climbName, sequence: generatedCount });
+    const candidate = await routeGenerator.generatePlayable(
+      { grade: targetGrade, name: climbName, sequence: generatedCount },
+      (variant, attempt) => ClimbGenPlanner.planAsync({ holds: routeHolds(variant) }, holdMap, {
+        maxExpanded: 500, beamWidth: 24, maxDepth: 24,
+        onProgress: (expanded) => { $('board-status').textContent = `CHECK ${attempt + 1} · ${expanded} STATES`; },
+      }),
+      { maxChecks: 8, onProgress: (attempt, total) => {
+        $('board-status').textContent = `CHECKING ${attempt}/${total}`;
+        $('generate-button').querySelector('span:nth-child(2)').textContent = `Checking variant ${attempt}/${total}…`;
+      } },
+    );
     return {
       holds: routeHolds(candidate),
       source: candidate.source,
       changed: candidate.changed,
       name: climbName,
+      betaPlan: candidate.betaPlan,
     };
   }
   function renderResult(problem) {
@@ -150,7 +161,7 @@
     button.disabled = true;
     button.textContent = 'Planning contacts…';
     $('beta-status').textContent = 'SEARCHING CONTACT STATES';
-    ClimbGenPlanner.planAsync(currentProblem, holdMap, { onProgress: (expanded) => { $('beta-status').textContent = `SEARCHING · ${expanded} STATES`; } }).then((result) => {
+    Promise.resolve(currentProblem.betaPlan || ClimbGenPlanner.planAsync(currentProblem, holdMap, { onProgress: (expanded) => { $('beta-status').textContent = `SEARCHING · ${expanded} STATES`; } })).then((result) => {
       if (!result.ok) {
         button.disabled = false;
         button.textContent = 'Try beta search again';
@@ -231,9 +242,9 @@
     button.disabled = true;
     button.querySelector('span:nth-child(2)').textContent = 'Finding a route…';
     $('board-status').textContent = 'GENERATING';
-    window.setTimeout(() => {
+    window.setTimeout(async () => {
       try {
-        const result = sampleProblem();
+        const result = await sampleProblem();
         if (!result) {
           $('board-status').textContent = 'NO ROUTE FOUND';
           $('route-copy').textContent = 'Could not find a reachable route. Try Generate again.';

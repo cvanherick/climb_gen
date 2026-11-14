@@ -28,11 +28,13 @@
     const verticalSpan = Math.max(...allHands.map((p) => p.y)) - Math.min(...allHands.map((p) => p.y));
     const lowMiddleCount = hands.filter((p) => p.y < startY - 10).length;
     const isolatedDistance = Math.max(...hands.map((p) => Math.min(...allHands.filter((q) => q !== p).map((q) => Math.hypot(p.x - q.x, p.y - q.y)))));
+    if (starts.some((p) => p.y > (options.maxStartY ?? 44))) return { ok: false, reason: 'start hold too high' };
+    if (starts.length > 1 && Math.hypot(starts[0].x - starts[1].x, starts[0].y - starts[1].y) > 40) return { ok: false, reason: 'start holds too far apart' };
     if (finishY - startY < (options.minFinishProgress ?? 24)) return { ok: false, reason: 'finish below route progress' };
     if (verticalSpan < (options.minVerticalSpan ?? 48)) return { ok: false, reason: 'route too compressed vertically' };
     if (lowMiddleCount > 1) return { ok: false, reason: 'too many hands below the start' };
     if (isolatedDistance > (options.maxHoldGap ?? 36)) return { ok: false, reason: 'isolated hand hold' };
-    if (!hasProgressingHandSequence(starts, hands, finishes[0], options.maxReach ?? 43)) return { ok: false, reason: 'no upward hand sequence' };
+    if (!hasProgressingHandSequence(starts, hands, finishes[0], options.maxReach ?? 36)) return { ok: false, reason: 'no upward hand sequence' };
     return { ok: true, features: { finishProgress: finishY - startY, verticalSpan, lowMiddleCount, isolatedDistance } };
   }
   function hasProgressingHandSequence(starts, hands, finish, maxReach) {
@@ -130,7 +132,17 @@
       }
       throw new Error(`Could not find a new quality-checked ${chosenGrade} variant after ${options.attempts ?? 900} attempts. Generate again.`);
     }
-    return { generate, grades, countGenerated: () => seen.size, assess: (holds) => assess(holds, placements) };
+    async function generatePlayable(request, validate, config = {}) {
+      const checks = config.maxChecks ?? 6;
+      for (let attempt = 0; attempt < checks; attempt++) {
+        const candidate = generate({ ...request, sequence: Number(request.sequence || 0) * checks + attempt });
+        config.onProgress?.(attempt + 1, checks);
+        const betaPlan = await validate(candidate, attempt);
+        if (betaPlan?.ok) return { ...candidate, betaPlan, checksPerformed: attempt + 1 };
+      }
+      throw new Error(`Could not find a beta-plannable variant after ${checks} quality-checked attempts. Generate again.`);
+    }
+    return { generate, generatePlayable, grades, countGenerated: () => seen.size, assess: (holds) => assess(holds, placements) };
   }
   return { create, assess, signature };
 });

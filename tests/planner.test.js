@@ -61,8 +61,24 @@ test('on-demand generator produces fresh quality-checked variants beyond the bun
     assert.equal(route.source.grade, 'V5');
     assert.ok(route.changed > 0);
     assert.ok(RouteGenerator.assess(route.holds, placements).ok);
+    for (const [id, role] of route.holds) if (role === 5) assert.ok(placements.get(String(id)).y <= 44, 'start must be in the lower third of the board');
     assert.ok(!signatures.has(route.signature), `Repeated variant at ${sequence}`);
     signatures.add(route.signature);
   }
   assert.equal(generator.countGenerated(), 100);
+});
+
+test('one generated variant per selectable grade has low starts and a beta plan', async () => {
+  const { data, placements } = loadData();
+  const generator = RouteGenerator.create(data, { salt: 'grade-feasibility-regression' });
+  for (let grade = 0; grade <= 11; grade++) {
+    const route = await generator.generatePlayable(
+      { grade: `V${grade}`, name: 'Grade check', sequence: grade },
+      (candidate) => Planner.planAsync({ holds: candidate.holds.map(([id, role]) => ({ id, role })) }, placements, { maxExpanded: 500, beamWidth: 24, maxDepth: 24 }),
+      { maxChecks: 8 },
+    );
+    assert.ok(route.holds.filter(([, role]) => role === 5).every(([id]) => placements.get(String(id)).y <= 44));
+    assert.equal(route.betaPlan.ok, true, `V${grade}`);
+    assert.ok(route.checksPerformed >= 1 && route.checksPerformed <= 8);
+  }
 });
