@@ -20,7 +20,10 @@
     const span = (items, key) => items.length ? Math.max(...items.map((p) => p[key])) - Math.min(...items.map((p) => p[key])) : 0;
     let pairTotal = 0, pairCount = 0;
     for (let i = 0; i < hands.length; i++) for (let j = i + 1; j < hands.length; j++) { pairTotal += Math.hypot(hands[i].x - hands[j].x, hands[i].y - hands[j].y); pairCount++; }
-    const nearestDistances = hands.map((p, i) => Math.min(...hands.filter((_, j) => j !== i).map((q) => Math.hypot(p.x - q.x, p.y - q.y))).filter(Number.isFinite));
+    const nearestDistances = hands.map((p, i) => {
+      const distances = hands.filter((_, j) => j !== i).map((q) => Math.hypot(p.x - q.x, p.y - q.y));
+      return distances.length ? Math.min(...distances) : NaN;
+    }).filter(Number.isFinite);
     const bboxArea = Math.max(1, span(active, 'x') * span(active, 'y'));
     return [starts.length, hands.length, finishes.length, feet.length, mean(hands, 'x'), mean(hands, 'y'), span(hands, 'x'), span(hands, 'y'), mean(active, 'x'), mean(active, 'y'), span(active, 'x'), span(active, 'y'), pairCount ? pairTotal / pairCount : 0, nearestDistances.length ? nearestDistances.reduce((a, b) => a + b, 0) / nearestDistances.length : 0, mean(finishes, 'y') - mean(starts, 'y'), points.length / bboxArea];
   }
