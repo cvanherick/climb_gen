@@ -20,6 +20,8 @@ The browser now generates a new climb variant on every click rather than cycling
 
 The generator ranks a small pool of screened variants with the learned evaluator when its model file is loaded. The community rating data is quality-filtered and contains no negative labels for generated routes, so the score cannot reliably flag bad climbs; human ratings on generated problems are needed to learn that distinction. Route checks are geometric filters, not a real-world safety test.
 
+The climb-style selector offers **Any style**, **Static**, and **Dyno-like**. Static biases the beta search toward shorter, controlled hand reaches; Dyno-like favors longer hand reaches and then ranks a small set of playable route variants by those reach distances. Both retain the planner's ordinary limb-reach checks. This is runtime heuristic conditioning: the TB2 training rows do not label movement style, so the DDPM checkpoint is still conditioned on grade only, and Dyno-like does not simulate a jump, momentum, or flight.
+
 ## Deploy with GitHub Pages
 
 The `.github/workflows/pages.yml` workflow builds the app and deploys it to GitHub Pages whenever a change is pushed to `main`. It can also be run manually from the repository’s Actions tab. `scripts/build_pages.py` serves the app code, TB2 data, and board images as separate same-origin files. Use `python3 -m http.server` to preview that build locally; `scripts/build_standalone.py` makes offline copies instead.
