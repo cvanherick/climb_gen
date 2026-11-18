@@ -33,6 +33,7 @@
           <div class="intro-controls">
             <label class="name-control" for="climb-name"><span>CLIMB NAME</span><input id="climb-name" type="text" maxlength="32" placeholder="e.g. Moonshot" autocomplete="off" aria-label="Climb name" /></label>
             <label class="grade-control" for="grade-select"><span>TARGET GRADE</span><select id="grade-select" aria-label="Target climbing grade"><option value="any">Any</option><option>V0</option><option>V1</option><option>V2</option><option>V3</option><option>V4</option><option selected>V5</option><option>V6</option><option>V7</option><option>V8</option><option>V9</option><option>V10</option><option>V11</option></select></label>
+            <label class="style-control" for="style-select"><span>CLIMB STYLE</span><select id="style-select" aria-label="Climb movement style"><option value="any" selected>Any style</option><option value="static">Static</option><option value="dynamic">Dyno-like</option></select></label>
             <button id="generate-button" class="generate-button" type="button"><span class="generate-icon">✳</span><span>Generate problem</span><span class="button-arrow">↗</span></button>
           </div>
         </section>
@@ -63,7 +64,7 @@
               <label>Speed <select id="playback-speed"><option value="1">1×</option><option value="0.7">0.7×</option><option value="1.4">1.4×</option></select></label>
             </div>
             <details id="planner-debug" class="planner-debug" hidden><summary>Planner diagnostics</summary><pre id="planner-diagnostics"></pre></details>
-            <div class="model-note"><span class="note-mark">⌁</span><p>Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.</p></div>
+            <div class="model-note"><span class="note-mark">⌁</span><p id="beta-note">Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.</p></div>
             <div class="result-footer"><i></i> COMMUNITY DATA · 40° <span>BoardLib</span></div>
           </aside>
         </section>
