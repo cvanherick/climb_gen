@@ -14,7 +14,15 @@
     const maxExpanded = options.maxExpanded ?? 500;
     const beamWidth = options.beamWidth ?? 36;
     const maxDepth = options.maxDepth ?? 30;
-    const weights = { reach: 0.28, stability: 0.12, effort: 1, awkwardness: 1 / 90, movement: 0.65, repeatLimb: 0.18, crossThrough: 0.28, highFoot: 0.16, ...(options.weights || {}) };
+    const style = options.style === 'static' || options.style === 'dynamic' ? options.style : 'any';
+    const weights = {
+      reach: 0.28, stability: 0.12, effort: 1, awkwardness: 1 / 90,
+      movement: style === 'dynamic' ? 0.36 : style === 'static' ? 0.82 : 0.65,
+      repeatLimb: style === 'dynamic' ? 0.1 : 0.18,
+      crossThrough: style === 'dynamic' ? 0.08 : style === 'static' ? 0.48 : 0.28,
+      highFoot: style === 'dynamic' ? 0.06 : style === 'static' ? 0.28 : 0.16,
+      ...(options.weights || {}),
+    };
     const lookup = (id) => placements instanceof Map ? placements.get(String(id)) || placements.get(id) : placements[String(id)];
     const holds = problem.holds.map((h) => ({ ...h, position: lookup(h.id) })).filter((h) => h.position);
     const starts = holds.filter((h) => h.role === 5).sort((a, b) => a.position.x - b.position.x);
@@ -110,11 +118,14 @@
             const highFootPenalty = isHighFoot
               ? weights.highFoot * Math.min(2, (targetPosition.y - pose.torso.y - 12) / 20)
               : 0;
-            const movementQualityPenalty = crossPenalty + highFootPenalty;
+            const lungeBias = isHand && movement > 18
+              ? (style === 'dynamic' ? -0.24 : style === 'static' ? 0.18 : 0) * Math.min(1, (movement - 18) / 18)
+              : 0;
+            const movementQualityPenalty = crossPenalty + highFootPenalty + lungeBias;
             const next = {
               contacts, initialContacts: current.initialContacts, visited, pose, depth: depth + 1,
               g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + repeatsLimb + movementQualityPenalty,
-              path: [...current.path, { limb, label: labels[limb], movementType, movementQualityPenalty, id: target.id, role: target.role, contacts, pose, diagnostics: diag }],
+              path: [...current.path, { limb, label: labels[limb], movementType, movementDistance: movement, movementQualityPenalty, id: target.id, role: target.role, contacts, pose, diagnostics: diag }],
             };
             const key = keyOf(next), previousCost = seen.get(key);
             if (previousCost != null && previousCost <= next.g) continue;
