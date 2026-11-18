@@ -7,9 +7,9 @@
   if (root) root.ClimbGenIK = api;
 })(typeof globalThis === 'object' ? globalThis : this, (spectrum) => {
   const DEFAULT_BODY = Object.freeze({
-    upperArm: 18, lowerArm: 18,
+    upperArm: 16.5, lowerArm: 16,
     upperLeg: 19, lowerLeg: 18,
-    torsoLength: 15, shoulderWidth: 12, hipWidth: 10,
+    torsoLength: 19, shoulderWidth: 13, hipWidth: 10,
     headRadius: 3.2,
     elbowMinDeg: 38, elbowMaxDeg: 148,
     kneeMinDeg: 42, kneeMaxDeg: 145,
@@ -106,13 +106,22 @@
     const mismatch = Math.max(0, angle - freeAngle) / (Math.PI - freeAngle);
     return { cost: weight * mismatch * mismatch, weight, mismatch };
   }
-  function scoreTorso(torso, contacts, placements, previous, body, overhangDeg) {
-    let reachSquared = 0, angleSquared = 0, maxReachViolation = 0, maxAngleViolation = 0;
-    const points = {};
-    let directionCost = 0, directionContacts = 0, reviewedContacts = 0, footDifficultyCost = 0, handDifficultyCost = 0;
+  // A torso search can examine hundreds of poses on exactly the same holds.
+  // Resolve those contacts and their support polygon once per stance.
+  function contactGeometry(contacts, placements, airborneLimb = null) {
+    const targets = [], anchors = [];
     for (const [limb, id] of Object.entries(contacts)) {
       if (id == null) continue;
       const target = lookup(placements, id);
+      targets.push({ limb, target });
+      if (target && limb !== airborneLimb) anchors.push({ x: target.x, y: target.y });
+    }
+    return { targets, hull: convexHull(anchors), count: anchors.length };
+  }
+  function scoreTorso(torso, geometry, previous, body, overhangDeg) {
+    let reachSquared = 0, angleSquared = 0, maxReachViolation = 0, maxAngleViolation = 0;
+    let directionCost = 0, directionContacts = 0, reviewedContacts = 0, footDifficultyCost = 0, handDifficultyCost = 0;
+    for (const { limb, target } of geometry.targets) {
       if (!target) return { cost: Infinity, maxReachViolation: Infinity, maxAngleViolation: Infinity };
       const root = rootFor(limb, torso, body), [a, b] = lengths(limb, body);
       const boneTarget = limbTarget(limb, target, torso, body);
@@ -140,16 +149,14 @@
       maxAngleViolation = Math.max(maxAngleViolation, angleViolation);
       reachSquared += reachViolation * reachViolation + 2.2 * Math.max(0, d / (a + b) - 0.78) ** 2;
       angleSquared += angleViolation * angleViolation / 900 + 0.12 * ((angle - 95) / 95) ** 2;
-      points[limb] = { root, target: { x: target.x, y: target.y }, angleDeg: angle, reach: d };
     }
-    const anchors = Object.values(points).map((p) => p.target);
     const com = { x: torso.x, y: torso.y + body.torsoLength * 0.48 };
-    const hull = convexHull(anchors);
+    const hull = geometry.hull;
     const outside = outsideHullDistance(com, hull);
     // The 40° overhang only scales an out-of-support-polygon penalty by
     // tan(angle). It is not a calculation of force, friction, or fall risk.
     const overhangScale = Math.tan(Math.max(0, Math.min(70, overhangDeg)) * Math.PI / 180);
-    const supportCost = (outside / 24) ** 2 * (1 + overhangScale) + Math.max(0, 3 - anchors.length) * 0.18;
+    const supportCost = (outside / 24) ** 2 * (1 + overhangScale) + Math.max(0, 3 - geometry.count) * 0.18;
     const effort = previous
       ? ((torso.x - previous.x) ** 2 + (torso.y - previous.y) ** 2) / 225 + ((torso.theta - previous.theta) / 0.25) ** 2 + (((torso.hipTheta || 0) - (previous.hipTheta || 0)) / 0.25) ** 2
       : 0;
@@ -158,14 +165,14 @@
       + ((torso.theta - (torso.hipTheta || 0)) / 0.7) ** 2 * 0.12;
     return {
       cost: reachSquared * 12 + angleSquared * 4 + supportCost * 2.4 + effort * 0.12 + orientationCost + directionCost * 3 + footDifficultyCost * 0.35 + handDifficultyCost * 0.25,
-      maxReachViolation, maxAngleViolation, supportCost, directionCost, footDifficultyCost, handDifficultyCost, directionContacts, reviewedContacts, com, hull, points,
+      maxReachViolation, maxAngleViolation, supportCost, directionCost, footDifficultyCost, handDifficultyCost, directionContacts, reviewedContacts, com, hull,
       reachable: maxReachViolation < 0.1,
       kinematic: maxReachViolation < 0.1 && maxAngleViolation < 0.1,
     };
   }
-  function optimizeSeed(seed, contacts, placements, previous, body, overhangDeg, iterations) {
+  function optimizeSeed(seed, geometry, previous, body, overhangDeg, iterations) {
     let torso = { x: seed.x, y: seed.y, theta: seed.theta, hipTheta: seed.hipTheta || 0 };
-    let best = scoreTorso(torso, contacts, placements, previous, body, overhangDeg);
+    let best = scoreTorso(torso, geometry, previous, body, overhangDeg);
     let xyStep = 7, angleStep = 0.16;
     for (let i = 0; i < iterations; i++) {
       let improved = false;
@@ -176,7 +183,7 @@
           proposal.y = Math.max(0, Math.min(144, proposal.y));
           proposal.theta = Math.max(-body.torsoAngleLimit, Math.min(body.torsoAngleLimit, proposal.theta));
           proposal.hipTheta = Math.max(-body.hipAngleLimit, Math.min(body.hipAngleLimit, proposal.hipTheta));
-          const candidate = scoreTorso(proposal, contacts, placements, previous, body, overhangDeg);
+          const candidate = scoreTorso(proposal, geometry, previous, body, overhangDeg);
           if (candidate.cost + 1e-9 < best.cost) { torso = proposal; best = candidate; improved = true; }
         }
       }
@@ -184,7 +191,7 @@
     }
     return { torso, score: best };
   }
-  function extremities(pose, body) {
+  function extremities(pose, body, motion) {
     const unit = (a, b) => {
       const d = Math.max(1e-6, Math.hypot(b.x - a.x, b.y - a.y));
       return { x: (b.x - a.x) / d, y: (b.y - a.y) / d };
@@ -195,6 +202,7 @@
       const contact = pose.points[side + 'Hand'], elbow = pose.points[side + 'Elbow'];
       const toe = pose.points[side + 'Foot'], knee = pose.points[side + 'Knee'];
       if (contact && elbow) {
+        const grip = motion?.movingLimb === side + 'Hand' ? motion.grip : 1;
         const axis = unit(elbow, contact), lateral = { x: -axis.y, y: axis.x };
         const wrist = { x: contact.x - axis.x * body.palmLength, y: contact.y - axis.y * body.palmLength };
         pose.points[side + 'Wrist'] = wrist;
@@ -202,13 +210,13 @@
         // Five three-segment digit chains curl toward the contact. Their
         // lengths and curl are illustrative; the contact anchor stays fixed.
         for (let digit = 0; digit < 5; digit++) {
-          const spread = (digit - 2) * 0.28;
+          const spread = (digit - 2) * (0.28 + (1 - grip) * 0.12);
           const base = { x: contact.x - axis.x * 0.45 + lateral.x * spread, y: contact.y - axis.y * 0.45 + lateral.y * spread };
           const chain = [base];
           let angle = Math.atan2(axis.y, axis.x) + (digit === 0 ? sign * 0.7 : 0);
           const length = body.fingerLength * (digit === 0 ? 0.7 : digit === 2 ? 1 : 0.86);
           for (let joint = 0; joint < 3; joint++) {
-            angle += sign * (joint ? 0.65 : 0.15);
+            angle += sign * (joint ? 0.12 + 0.53 * grip : 0.15);
             const last = chain.at(-1), segment = length * [0.44, 0.33, 0.23][joint];
             chain.push({ x: last.x + Math.cos(angle) * segment, y: last.y + Math.sin(angle) * segment });
           }
@@ -229,13 +237,14 @@
     const body = { ...DEFAULT_BODY, ...(options.body || {}) };
     const overhangDeg = options.overhangDeg ?? 40;
     const iterations = options.iterations ?? 16;
-    const endpoints = Object.values(contacts).filter((id) => id != null).map((id) => lookup(placements, id)).filter(Boolean);
+    const geometry = contactGeometry(contacts, placements);
+    const endpoints = geometry.targets.map(({ target }) => target).filter(Boolean);
     const mean = endpoints.reduce((acc, p) => ({ x: acc.x + p.x / endpoints.length, y: acc.y + p.y / endpoints.length }), { x: 0, y: 0 });
     const previousTorso = previous || { x: mean.x, y: mean.y - body.torsoLength * 0.7, theta: 0 };
     const seeds = [previousTorso, { x: mean.x, y: mean.y - body.torsoLength * 0.6, theta: 0 }, { x: mean.x, y: mean.y - body.torsoLength, theta: -0.12 }];
     let best = null;
     for (const seed of seeds) {
-      const result = optimizeSeed(seed, contacts, placements, previous, body, overhangDeg, iterations);
+      const result = optimizeSeed(seed, geometry, previous, body, overhangDeg, iterations);
       if (!best || result.score.cost < best.score.cost) best = result;
     }
     return poseAt(best.torso, contacts, placements, options);
@@ -243,7 +252,9 @@
   // Rendering a continuous trajectory must not restart the torso optimizer.
   function poseAt(torso, contacts, placements, options = {}) {
     const body = { ...DEFAULT_BODY, ...(options.body || {}) };
-    const diagnostics = scoreTorso(torso, contacts, placements, null, body, options.overhangDeg ?? 40);
+    const motion = options.motion;
+    const geometry = contactGeometry(contacts, placements, motion?.airborne ? motion.movingLimb : null);
+    const diagnostics = scoreTorso(torso, geometry, null, body, options.overhangDeg ?? 40);
     const pose = {
       torso,
       points: {
@@ -272,9 +283,12 @@
     const leftShoulder = rootFor('leftHand', torso, body), rightShoulder = rootFor('rightHand', torso, body);
     pose.points.leftShoulder = leftShoulder; pose.points.rightShoulder = rightShoulder;
     pose.points.neck = { x: (leftShoulder.x + rightShoulder.x) / 2, y: (leftShoulder.y + rightShoulder.y) / 2 };
+    const gaze = motion?.gazeTarget;
+    const headTilt = gaze ? Math.max(-0.32, Math.min(0.32,
+      Math.atan2(gaze.x - pose.points.neck.x, Math.max(12, gaze.y - pose.points.neck.y)))) * motion.attention : 0;
     pose.points.head = {
-      x: pose.points.neck.x - Math.sin(torso.theta) * body.headRadius * 2,
-      y: pose.points.neck.y + Math.cos(torso.theta) * body.headRadius * 2,
+      x: pose.points.neck.x - Math.sin(torso.theta - headTilt) * body.headRadius * 1.65,
+      y: pose.points.neck.y + Math.cos(torso.theta - headTilt) * body.headRadius * 1.65,
     };
     pose.points.leftHip = rootFor('leftFoot', torso, body); pose.points.rightHip = rootFor('rightFoot', torso, body);
     let maxSegmentResidual = 0;
@@ -311,7 +325,8 @@
     }
     pose.diagnostics.maxSegmentResidual = maxSegmentResidual;
     pose.diagnostics.kinematic = pose.diagnostics.kinematic && maxSegmentResidual < 0.1;
-    extremities(pose, body);
+    if (!options.jointsOnly) extremities(pose, body, motion);
+    if (motion) pose.motion = motion;
     return pose;
   }
   function interpolate(a, b, t) {

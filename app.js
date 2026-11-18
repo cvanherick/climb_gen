@@ -22,12 +22,24 @@
     for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
     return el;
   }
-  function drawBoard(route = null, activeStep = -1, figure = null) {
-    svg.replaceChildren();
-    svg.append(
-      svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: boardAssets.plastic, preserveAspectRatio: 'none' }),
-      svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: boardAssets.wood, preserveAspectRatio: 'none' }),
-    );
+  const boardLayer = svgEl('g');
+  const activeRing = svgEl('circle', { r: 16, class: 'active-ring', 'pointer-events': 'none' });
+  const avatar = svgEl('g', { class: 'climber', 'pointer-events': 'none' });
+  const overlay = svgEl('g', { 'pointer-events': 'none' });
+  const scaleX = board.width / (board.right - board.left), scaleY = board.height / (board.top - board.bottom);
+  const origin = point(0, 0);
+  // The figure uses the same board coordinates as the solver and contact targets.
+  avatar.setAttribute('transform', `translate(${origin.x} ${origin.y}) scale(${scaleX} ${-scaleY})`);
+  svg.append(
+    svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: boardAssets.plastic, preserveAspectRatio: 'none' }),
+    svgEl('image', { x: board.x, y: board.y, width: board.width, height: board.height, href: boardAssets.wood, preserveAspectRatio: 'none' }),
+    boardLayer, activeRing, avatar, overlay,
+  );
+  let ringRoute, ringRevision, ringVectors;
+  function updateRouteRings(route, showVectors) {
+    if (ringRoute === route && ringRevision === holdProfileRevision && ringVectors === showVectors) return;
+    ringRoute = route; ringRevision = holdProfileRevision; ringVectors = showVectors;
+    boardLayer.replaceChildren();
     if (route) {
       route.holds.forEach((hold) => {
         const position = holdMap.get(String(hold.id));
@@ -37,82 +49,96 @@
         const title = svgEl('title');
         title.textContent = `${role} · ${position.label} · placement ${hold.id}`;
         ring.append(title);
-        svg.append(ring);
+        boardLayer.append(ring);
         const profile = position.profile;
-        if ($('hold-vectors')?.checked && profile && !profile.unknown) {
+        if (showVectors && profile && !profile.unknown) {
           const end = point(position.x + profile.pull.x * 5, position.y + profile.pull.y * 5);
           const dx = end.x - p.x, dy = end.y - p.y, angle = Math.atan2(dy, dx);
           const arrow = svgEl('path', { d: `M ${p.x} ${p.y} L ${end.x} ${end.y} M ${end.x - 4 * Math.cos(angle - 0.6)} ${end.y - 4 * Math.sin(angle - 0.6)} L ${end.x} ${end.y} L ${end.x - 4 * Math.cos(angle + 0.6)} ${end.y - 4 * Math.sin(angle + 0.6)}`, fill: 'none', stroke: profile.verified ? '#a9e84a' : '#ffba68', 'stroke-width': 1.7, 'pointer-events': 'none' });
-          svg.append(arrow);
+          boardLayer.append(arrow);
         }
         ring.addEventListener('click', () => { $('hold-profile-select').value = String(hold.id); $('hold-profile-select').dispatchEvent(new Event('change')); });
       });
-      if (activeStep >= 0 && route.betaSteps?.[activeStep]) {
-        const hold = holdMap.get(String(route.betaSteps[activeStep].id));
-        const p = point(hold.x, hold.y);
-        svg.append(svgEl('circle', { cx: p.x, cy: p.y, r: 16, class: 'active-ring' }));
-      }
     }
-    if (figure) {
-      drawClimber(figure);
-      if (!$('planner-debug').hidden && $('planner-debug').open) drawPlannerOverlay(figure);
+  }
+  function drawBoard(route = null, activeStep = -1, figure = null) {
+    updateRouteRings(route, Boolean($('hold-vectors')?.checked));
+    const step = route?.betaSteps?.[activeStep];
+    activeRing.style.display = step ? '' : 'none';
+    if (step) {
+      const target = holdMap.get(String(step.id)), p = point(target.x, target.y);
+      activeRing.setAttribute('cx', p.x);
+      activeRing.setAttribute('cy', p.y);
     }
+    avatar.style.display = figure ? '' : 'none';
+    if (figure) drawClimber(figure);
+    overlay.replaceChildren();
+    if (figure && !$('planner-debug').hidden && $('planner-debug').open) drawPlannerOverlay(figure);
   }
   function drawPlannerOverlay(frame) {
     const diagnostics = frame.diagnostics;
     if (diagnostics?.supportHull?.length > 1) {
       const points = diagnostics.supportHull.map((p) => { const q = point(p.x, p.y); return `${q.x},${q.y}`; }).join(' ');
-      svg.append(svgEl('polygon', { points, class: 'debug-support' }));
+      overlay.append(svgEl('polygon', { points, class: 'debug-support' }));
     }
     if (diagnostics?.centerOfMass) {
       const p = point(diagnostics.centerOfMass.x, diagnostics.centerOfMass.y);
-      svg.append(svgEl('circle', { cx: p.x, cy: p.y, r: 5, class: 'debug-com' }));
+      overlay.append(svgEl('circle', { cx: p.x, cy: p.y, r: 5, class: 'debug-com' }));
     }
     for (const limb of ['leftHand', 'rightHand', 'leftFoot', 'rightFoot']) {
       const anchor = frame.points[limb];
       if (!anchor) continue;
       const p = point(anchor.x, anchor.y);
-      svg.append(svgEl('circle', { cx: p.x, cy: p.y, r: 4, class: 'debug-contact' }));
+      overlay.append(svgEl('circle', { cx: p.x, cy: p.y, r: 4, class: 'debug-contact' }));
     }
   }
+  const bodyPaths = new Map();
+  const xy = p => `${p.x.toFixed(3)} ${p.y.toFixed(3)}`;
+  const blend = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  // Outline a limb along its solved centreline, with its widest point near the muscle belly.
+  function limbShape(a, b, startRadius, belly, endRadius) {
+    const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy) || 1;
+    const side = (t, r) => xy({ x: a.x + dx * t - dy / length * r, y: a.y + dy * t + dx / length * r });
+    return `M ${side(0, startRadius)} Q ${side(0.36, belly)} ${side(1, endRadius)} A ${endRadius} ${endRadius} 0 0 0 ${side(1, -endRadius)} Q ${side(0.36, -belly)} ${side(0, -startRadius)} A ${startRadius} ${startRadius} 0 0 0 ${side(0, startRadius)} Z`;
+  }
   function drawClimber(frame) {
-    const line = (a, b, className = 'climber-limb') => {
-      const aa = point(a.x, a.y), bb = point(b.x, b.y);
-      svg.append(svgEl('line', { x1: aa.x, y1: aa.y, x2: bb.x, y2: bb.y, class: className }));
-    };
-    const dot = (p, r, className = 'climber-joint') => {
-      const pp = point(p.x, p.y);
-      svg.append(svgEl('circle', { cx: pp.x, cy: pp.y, r, class: className }));
+    // Reuse the paths during playback so the board photos, interaction targets,
+    // and figure stay mounted even when the browser drops a frame.
+    const paint = (id, material, d) => {
+      let path = bodyPaths.get(id);
+      if (!path) {
+        path = svgEl('path', { class: `kit-${material}` });
+        avatar.append(path);
+        bodyPaths.set(id, path);
+      }
+      path.setAttribute('d', d);
     };
     const p = frame.points;
-    const outline = [p.leftShoulder, p.rightShoulder, p.rightHip, p.leftHip].map(q => { const v = point(q.x, q.y); return `${v.x},${v.y}`; }).join(' ');
-    svg.append(svgEl('polygon', { points: outline, class: 'climber-torso' }));
-    line(p.neck, p.head, 'climber-neck');
-    line(p.leftShoulder, p.rightShoulder, 'climber-body');
-    line(p.leftHip, p.rightHip, 'climber-body');
+    const limb = (id, material, a, b, ra, rb, rc) => paint(id, material, limbShape(a, b, ra, rb, rc));
     for (const side of ['left', 'right']) {
-      line(p[`${side}Shoulder`], p[`${side}Elbow`]);
-      line(p[`${side}Elbow`], p[`${side}Wrist`] || p[`${side}Hand`]);
-      const hand = frame.hands?.[side];
-      if (hand) {
-        line(hand.wrist, hand.contact, 'climber-digit');
-        dot(hand.wrist, 2);
-        for (const finger of hand.fingers) for (let i = 1; i < finger.length; i++) line(finger[i - 1], finger[i], 'climber-digit');
-      }
-      line(p[`${side}Hip`], p[`${side}Knee`], 'climber-leg');
-      line(p[`${side}Knee`], p[`${side}Ankle`] || p[`${side}Foot`], 'climber-leg');
-      const foot = frame.feet?.[side];
-      if (foot) {
-        line(foot.heel, foot.ankle, 'climber-digit');
-        line(foot.ankle, foot.toe, 'climber-digit');
-        line(foot.toe, foot.heel, 'climber-digit');
-        dot(foot.ankle, 2);
-      }
-      dot(p[`${side}Elbow`], 3);
-      dot(p[`${side}Knee`], 3);
+      const hip = p[side + 'Hip'], knee = p[side + 'Knee'];
+      const foot = frame.feet[side], arm = frame.hands[side];
+      const shoulder = p[side + 'Shoulder'], elbow = p[side + 'Elbow'];
+      limb(side + 'thigh', 'pants', hip, knee, 3.3, 4.0, 2.0);
+      limb(side + 'shin', 'pants', knee, foot.ankle, 2.05, 3.05, 1.08);
+      const shoeUpper = blend(foot.ankle, knee, 0.07);
+      paint(side + 'shoe', 'rubber', `M ${xy(foot.heel)} Q ${xy(shoeUpper)} ${xy(foot.ankle)} L ${xy(foot.toe)} Q ${foot.toe.x} ${(foot.toe.y - 0.6).toFixed(3)} ${xy(foot.heel)} Z`);
+      limb(side + 'upperArm', 'skin', shoulder, elbow, 2.1, 2.75, 1.48);
+      limb(side + 'forearm', 'skin', elbow, arm.wrist, 1.48, 2.65, 0.86);
+      limb(side + 'palm', 'skin', arm.wrist, arm.contact, 0.86, 1.24, 0.7);
+      paint(side + 'fingers', 'fingers', arm.fingers.map(chain => 'M ' + chain.map(xy).join(' L ')).join(' '));
+      limb(side + 'sleeve', 'shirt', shoulder, blend(shoulder, elbow, 0.33), 2.4, 2.8, 2.2);
     }
-    dot(p.pelvis, 4);
-    dot(p.head, 12, 'climber-head');
+    // Waist, ribcage and shoulder line deform independently with the hips and chest.
+    const at = (across, up) => blend(blend(p.leftHip, p.rightHip, across), blend(p.leftShoulder, p.rightShoulder, across), up);
+    const q = (across, up) => xy(at(across, up));
+    paint('seat', 'pants', `M ${q(-0.06, 0.2)} L ${q(1.06, 0.2)} Q ${q(1.24, -0.28)} ${q(0.5, -0.24)} Q ${q(-0.24, -0.28)} ${q(-0.06, 0.2)} Z`);
+    limb('neck', 'skin', p.neck, p.head, 1.7, 1.65, 1.8);
+    paint('jersey', 'shirt', `M ${q(-0.09, 0.99)} Q ${q(0.5, 1.18)} ${q(1.09, 0.99)} Q ${q(1.18, 0.72)} ${q(1.00, 0.45)} L ${q(1.06, 0.07)} Q ${q(0.48, -0.03)} ${q(-0.06, 0.09)} L ${q(0.02, 0.43)} Q ${q(-0.17, 0.76)} ${q(-0.09, 0.99)} Z`);
+    paint('waistband', 'belt', `M ${q(-0.01, 0.06)} Q ${q(0.5, -0.04)} ${q(1.01, 0.06)}`);
+    paint('chalkBag', 'bag', `M ${q(0.32, 0.06)} L ${q(0.71, 0.09)} L ${q(0.72, -0.14)} Q ${q(0.54, -0.27)} ${q(0.36, -0.16)} Z`);
+    const crown = blend(p.neck, p.head, 1.26), nape = blend(p.neck, p.head, 0.8);
+    limb('head', 'hair', nape, crown, 2.45, 3.5, 2.85);
   }
   function routeHolds(record) {
     return record.holds.map(([id, role]) => ({ id, role }));
@@ -124,12 +150,11 @@
     const climbName = typedName || `Climb ${String(generatedCount + 1).padStart(2, '0')}`;
     const candidate = await routeGenerator.generatePlayable(
       { grade: targetGrade, name: climbName, sequence: generatedCount, style: climbStyle },
-      (variant, attempt) => ClimbGenPlanner.planAsync({ holds: routeHolds(variant) }, holdMap, {
+      (variant) => ClimbGenPlanner.planAsync({ holds: routeHolds(variant) }, holdMap, {
         maxExpanded: 500, beamWidth: 24, maxDepth: 24, style: climbStyle,
-        onProgress: (expanded) => { $('board-status').textContent = `CHECK ${attempt + 1} · ${expanded} STATES`; },
       }),
-      { maxChecks: 8, styleCandidates: climbStyle === 'any' ? 1 : 3, onProgress: (attempt, total) => {
-        $('board-status').textContent = `CHECKING ${attempt}/${total}`;
+      { maxChecks: 8, styleCandidates: climbStyle === 'any' ? 2 : 3, onProgress: (attempt, total) => {
+        $('board-status').textContent = `Checking route ${attempt} of ${total}`;
         $('generate-button').querySelector('span:nth-child(2)').textContent = `Checking variant ${attempt}/${total}…`;
       } },
     );
@@ -149,14 +174,10 @@
     currentProblem = problem;
     generatedCount++;
     $('route-title').textContent = problem.name;
-    $('route-grade').textContent = `40° · TARGET ${problem.source.grade}`;
-    const baseLabel = problem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${problem.source.templateId}`;
-    const modelReadout = problem.evaluation
-      ? ` · learned estimate ${problem.evaluation.predictedGrade} · community quality estimate ${problem.evaluation.quality.toFixed(1)}/5`
-      : '';
-    const styleReadout = problem.style === 'dynamic' ? ' · dyno-like, sparse holds, longer reach bias'
-      : problem.style === 'static' ? ' · static, shorter controlled reaches' : '';
-    $('route-copy').textContent = `${problem.holds.length} holds · grade-conditioned ${problem.source.grade} variation${styleReadout}${modelReadout} · based on ${baseLabel}`;
+    $('route-grade').textContent = `Target ${problem.source.grade}`;
+    const intent = problem.source.movementIntent;
+    const gradeEstimate = problem.evaluation ? `Estimated grade ${problem.evaluation.predictedGrade}.` : '';
+    $('route-copy').textContent = `${intent ? 'Movement focus · ' + intent + '. ' : ''}${gradeEstimate}`;
     $('beta-note').textContent = problem.style === 'dynamic'
       ? 'Dyno-like routes keep at most three middle hand holds and two footholds, favoring longer reach-checked moves. The animation does not model jumping or momentum.'
       : problem.style === 'static'
@@ -168,17 +189,18 @@
     $('beta-status').textContent = 'BETA HIDDEN';
     $('beta-button').hidden = false;
     $('beta-button').disabled = false;
-    $('beta-button').textContent = 'Reveal beta animation';
+    $('beta-button').textContent = 'Reveal beta';
     $('playback-controls').hidden = true;
     $('planner-debug').hidden = true;
     betaResult = null;
+    betaTimeline = null;
     betaAlternatives = [];
     activeBetaIndex = 0;
     $('playback-alternative').textContent = 'Alternative beta';
     $('playback-alternative').disabled = true;
     currentPose = null;
     betaPlaybackIndex = 0;
-    $('board-status').textContent = problem.changed ? 'GENERATED' : 'COMMUNITY ROUTE';
+    $('board-status').textContent = 'Problem ready';
     $('board-status').classList.add('ready');
     $('board-hint').classList.add('hidden');
     const list = $('sequence-list');
@@ -206,13 +228,13 @@
     button.textContent = 'Planning contacts…';
     $('beta-status').textContent = 'SEARCHING CONTACT STATES';
     const revision = holdProfileRevision, problem = currentProblem;
-    Promise.resolve(currentProblem.betaPlan || ClimbGenPlanner.planAsync(currentProblem, holdMap, { style: currentProblem.style, onProgress: (expanded) => { $('beta-status').textContent = `SEARCHING · ${expanded} STATES`; } })).then((result) => {
+    Promise.resolve(problem.betaPlan || ClimbGenPlanner.planAsync(problem, holdMap, { style: problem.style })).then((result) => {
       if (revision !== holdProfileRevision || problem !== currentProblem) return;
       if (!result.ok) {
         button.disabled = false;
         button.textContent = 'Try beta search again';
         $('beta-status').textContent = 'NO VALIDATED CONTACT PLAN';
-        $('route-copy').textContent = `${result.reason} No substitute sequence was shown.`;
+        $('beta-note').textContent = result.reason;
         return;
       }
       betaResult = result;
@@ -222,28 +244,37 @@
       $('playback-alternative').textContent = betaAlternatives.length > 1 ? `Beta 1 / ${betaAlternatives.length} · next` : 'One beta found';
       currentProblem.betaSteps = result.steps;
       $('move-count').textContent = result.steps.length;
-      const baseLabel = currentProblem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${currentProblem.source.templateId}`;
-      const styleReadout = currentProblem.style === 'dynamic' ? ' · dyno-like, sparse holds, longer reach bias'
-        : currentProblem.style === 'static' ? ' · static, shorter controlled reaches' : '';
-      $('route-copy').textContent = `${currentProblem.holds.length} holds · fresh ${currentProblem.source.grade} variant${styleReadout} · based on ${baseLabel}`;
-      $('sequence-list').replaceChildren(...result.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
+      $('sequence-list').replaceChildren(...result.steps.map((step, i) => sequenceItem(i + 1, step.id, `${step.label} · ${step.movementType}`, step.role === 7 ? 'finish' : step.limb.endsWith('Foot') ? 'foot' : 'hand')));
       $('planner-diagnostics').textContent = JSON.stringify({ expandedStates: result.expanded, invalidTransitions: result.invalidTransitions, planningTimeMs: result.elapsedMs, weightedCost: Number(result.cost.toFixed(2)), holdDirectionCost: result.diagnostics.maxHoldDirectionCost, holdDifficultySource: 'provisional manufacturer-chart tiers; grade model uses community route labels', movementTypes: [...new Set(result.steps.map((step) => step.movementType))], feasibility: { geometry: result.diagnostics.maxReachViolation < 0.25 ? 'modeled limb reach satisfied' : 'reach warning', kinematics: result.diagnostics.maxAngleViolationDeg < 1 && result.diagnostics.maxSegmentResidual < 0.1 ? 'modeled joint and segment limits satisfied' : 'pose warning', stability: 'heuristic estimate only', physical: 'unverified; no force, friction, grip, collision, or fall simulation' }, centerOfMassApproximation: result.initialPose.diagnostics.centerOfMass, supportPolygonApproximation: result.initialPose.diagnostics.supportHull, approximateStabilityCost: result.diagnostics.maxEstimatedStabilityCost, maxReachViolation: result.diagnostics.maxReachViolation, maxJointAngleLimitViolationDeg: result.diagnostics.maxAngleViolationDeg, maxTwoSegmentLengthResidual: result.diagnostics.maxSegmentResidual }, null, 2);
       $('planner-debug').hidden = false;
       $('playback-controls').hidden = false;
       button.disabled = false;
-      button.textContent = 'Replay beta animation';
-      playBeta(0);
+      button.textContent = 'Replay beta';
+      if (!$('tb2-view').hidden) playBeta(0);
+      else {
+        betaPaused = true;
+        $('playback-toggle').textContent = 'Play';
+      }
+    }).catch((error) => {
+      if (revision !== holdProfileRevision || problem !== currentProblem) return;
+      console.error('ClimbGen beta playback failed', error);
+      button.disabled = false;
+      button.textContent = 'Replay beta';
+      $('beta-status').textContent = 'Playback unavailable';
     });
   }
   let betaTimeline = null;
+  const timelines = new WeakMap();
   const betaClock = ClimbGenAnimation.clock();
   function playBeta(startIndex = 0, resume = false) {
     if (!betaResult?.ok) return;
     cancelAnimationFrame(betaFrame);
     if (!resume || !betaTimeline) {
-      betaTimeline = ClimbGenAnimation.create(betaResult, holdMap);
+      if (!timelines.has(betaResult)) timelines.set(betaResult, ClimbGenAnimation.create(betaResult, holdMap));
+      betaTimeline = timelines.get(betaResult);
       betaClock.reset(betaTimeline.segments[startIndex]?.start || 0);
     }
+    if (!resume) $('sequence-list').scrollTop = 0;
     betaPaused = false;
     $('playback-toggle').textContent = 'Pause';
     const tick = (now) => {
@@ -251,17 +282,24 @@
       const elapsed = betaClock.tick(now, Number($('playback-speed').value || 1));
       const frame = betaTimeline.sample(elapsed);
       currentPose = frame.pose;
+      const list = $('sequence-list'), rows = list.children, row = rows[frame.stepIndex];
+      if (frame.done || betaPlaybackIndex !== frame.stepIndex) rows[betaPlaybackIndex]?.classList.remove('active');
+      if (!frame.done && row && !row.classList.contains('active')) {
+        row.classList.add('active');
+        const bottom = row.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
+        if (bottom > 0) list.scrollTop += Math.ceil(bottom);
+      }
       betaPlaybackIndex = frame.stepIndex;
       drawBoard(currentProblem, frame.done ? -1 : frame.stepIndex, frame.pose);
       if (frame.done) {
         betaPaused = true;
         betaClock.pause();
         $('playback-toggle').textContent = 'Replay';
-        $('beta-status').textContent = 'BETA COMPLETE · GEOMETRIC ANIMATION';
+        $('beta-status').textContent = 'Finish matched';
         return;
       }
       const step = betaResult.steps[frame.stepIndex];
-      $('beta-status').textContent = `${frame.phase.toUpperCase()} · ${step.label.toUpperCase()} · ${frame.stepIndex + 1}/${betaResult.steps.length}`;
+      $('beta-status').textContent = `${frame.stepIndex + 1}/${betaResult.steps.length} · ${step.label} · ${frame.phase}`;
       betaFrame = requestAnimationFrame(tick);
     };
     betaFrame = requestAnimationFrame(tick);
@@ -287,11 +325,11 @@
     currentProblem.betaSteps = betaResult.steps;
     $('playback-alternative').textContent = `Beta ${activeBetaIndex + 1} / ${betaAlternatives.length} · next`;
     $('move-count').textContent = betaResult.steps.length;
-    $('sequence-list').replaceChildren(...betaResult.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
+    $('sequence-list').replaceChildren(...betaResult.steps.map((step, i) => sequenceItem(i + 1, step.id, `${step.label} · ${step.movementType}`, step.role === 7 ? 'finish' : step.limb.endsWith('Foot') ? 'foot' : 'hand')));
     playBeta(0);
   });
   $('planner-debug').addEventListener('toggle', () => {
-    if ($('planner-debug').open && currentProblem && currentPose) drawBoard(currentProblem, -1, currentPose);
+    if (currentProblem && currentPose) drawBoard(currentProblem, betaClock.elapsed >= betaTimeline?.duration ? -1 : betaPlaybackIndex, currentPose);
   });
   function makeProblem() {
     const button = $('generate-button');
@@ -300,7 +338,8 @@
     generating = true;
     button.disabled = true;
     button.querySelector('span:nth-child(2)').textContent = 'Finding a route…';
-    $('board-status').textContent = 'GENERATING';
+    $('board-status').classList.remove('ready');
+    $('board-status').textContent = 'Finding a problem…';
     window.setTimeout(async () => {
       try {
         const result = await sampleProblem();
@@ -709,6 +748,12 @@
   }
 
   function setActiveView(view) {
+    if (view !== 'tb2' && betaResult && !betaPaused) {
+      betaPaused = true;
+      betaClock.pause();
+      cancelAnimationFrame(betaFrame);
+      $('playback-toggle').textContent = 'Play';
+    }
     $('home-screen').hidden = view !== 'home';
     $('tb2-view').hidden = view !== 'tb2';
     $('photo-view').hidden = view !== 'photo';

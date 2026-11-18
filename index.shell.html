@@ -19,17 +19,17 @@
 
       <main class="page">
         <section id="home-screen" class="home-screen" aria-labelledby="home-title">
-          <div class="home-intro"><p class="eyebrow">CLIMBGEN <span>CHOOSE YOUR WALL</span></p><h1 id="home-title">Where are you<br /><em>climbing?</em></h1><p>Choose a wall to generate your next sequence.</p></div>
+          <div class="home-intro"><h1 id="home-title">Where are you<br /><em>climbing?</em></h1></div>
           <div class="home-options">
-            <button id="home-tb2" class="home-choice" type="button"><span class="home-choice-index">01 / FIXED BOARD</span><strong>Tension Board 2</strong><small>Generate a 40° Mirror climb from the TB2 dataset.</small><span class="home-choice-arrow">↗</span></button>
-            <button id="home-photo" class="home-choice photo" type="button"><span class="home-choice-index">02 / YOUR WALL</span><strong>Upload a wall photo</strong><small>Detect holds, choose a start, and build a sequence.</small><span class="home-choice-arrow">↗</span></button>
+            <button id="home-tb2" class="home-choice" type="button"><span class="home-choice-detail">40° · Mirror</span><strong>Tension Board 2</strong><small>Generate a problem by grade and style, then watch the beta.</small><span class="home-choice-arrow" aria-hidden="true">↗</span></button>
+            <button id="home-photo" class="home-choice photo" type="button"><strong>Upload a wall photo</strong><small>Detect holds, choose a start, and build a sequence.</small><span class="home-choice-arrow" aria-hidden="true">↗</span></button>
           </div>
         </section>
 
         <section id="tb2-view" class="app-view" hidden>
           <button id="tb2-home" class="back-home" type="button">← All tools</button>
         <section class="intro-row">
-          <div><p class="eyebrow">PROBLEM GENERATOR <span>01</span></p><h1>Find your next<br /><em>sequence.</em></h1><p class="intro-copy">Generate fresh variations from quality-rated TB2 climbs, on demand.</p></div>
+          <div><h1>Set your next <em>problem.</em></h1></div>
           <div class="intro-controls">
             <label class="name-control" for="climb-name"><span>CLIMB NAME</span><input id="climb-name" type="text" maxlength="32" placeholder="e.g. Moonshot" autocomplete="off" aria-label="Climb name" /></label>
             <label class="grade-control" for="grade-select"><span>TARGET GRADE</span><select id="grade-select" aria-label="Target climbing grade"><option value="any">Any</option><option>V0</option><option>V1</option><option>V2</option><option>V3</option><option>V4</option><option selected>V5</option><option>V6</option><option>V7</option><option>V8</option><option>V9</option><option>V10</option><option>V11</option></select></label>
@@ -40,7 +40,7 @@
 
         <section class="content-grid">
           <div class="board-card">
-            <div class="card-heading"><div><p class="eyebrow">HOLD MAP</p><h2>12 × 12 · Mirror layout</h2></div><span id="board-status" class="board-status">READY</span></div>
+            <div class="card-heading"><h2>12 × 12 Mirror</h2><span id="board-status" class="board-status" role="status">Ready</span></div>
             <div class="board-area">
               <svg id="board-svg" viewBox="0 0 600 620" role="img" aria-label="Authentic TB2 Mirror hold layout with generated route highlighted"></svg>
               <div id="board-hint" class="board-hint"><span>✳</span> Generate a problem to light the holds</div>
@@ -56,23 +56,22 @@
               <button id="hold-profile-reset" type="button">Use original estimates</button>
               <p id="hold-profile-status" role="status"></p>
             </details>
-            <div class="board-caption"><span><i class="legend-hold"></i> Actual TB2 hold set</span><span><i class="legend-route"></i> Generated problem</span><span>Layout data · 12 × 12</span></div>
+            <div class="board-caption"><span><i class="legend-hold start"></i> Start</span><span><i class="legend-hold hand"></i> Hand</span><span><i class="legend-hold foot"></i> Foot</span><span><i class="legend-hold finish"></i> Finish</span></div>
           </div>
 
           <aside class="result-card">
-            <p class="eyebrow">ROUTE READOUT</p>
-            <div class="result-top"><div><h2 id="route-title">Ready to climb?</h2><p class="route-byline">ClimbGen <span>·</span> New problem</p></div><span class="angle-chip" id="route-grade">40°</span></div>
-            <p class="result-copy" id="route-copy">One button. One fixed angle. A new set of holds from the TB2 dataset.</p>
+            <div class="result-top"><div><h2 id="route-title">Your problem</h2></div><span class="angle-chip" id="route-grade">40°</span></div>
+            <p class="result-copy" id="route-copy">Choose a grade and generate a problem.</p>
             <div class="result-stats"><div><span>HOLDS</span><b id="hold-count">—</b></div><div><span>MOVES</span><b id="move-count">—</b></div><div><span>DATA POOL</span><b id="data-count">3,027</b></div></div>
             <div class="sequence-heading"><p class="eyebrow">SUGGESTED BETA</p><span id="beta-status">WAITING</span></div>
-            <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">A four-limb contact search appears here.</li></ol>
-            <button id="beta-button" class="beta-button" type="button" hidden>Reveal beta animation <span>▶</span></button>
+            <button id="beta-button" class="beta-button" type="button" hidden>Reveal beta</button>
             <div id="playback-controls" class="playback-controls" hidden>
               <button id="playback-toggle" type="button">Pause</button>
               <button id="playback-replay" type="button">Replay</button>
               <button id="playback-alternative" type="button" disabled>Alternative beta</button>
               <label>Speed <select id="playback-speed"><option value="1">1×</option><option value="0.7">0.7×</option><option value="1.4">1.4×</option></select></label>
             </div>
+            <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">Reveal beta to see the moves.</li></ol>
             <details id="planner-debug" class="planner-debug" hidden><summary>Planner diagnostics</summary><pre id="planner-diagnostics"></pre></details>
             <div class="model-note"><span class="note-mark">⌁</span><p id="beta-note">Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.</p></div>
             <div class="result-footer"><i></i> COMMUNITY DATA · 40° <span>BoardLib</span></div>

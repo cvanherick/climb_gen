@@ -15,6 +15,56 @@
     let state = seed || 1;
     return () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 4294967296; };
   }
+  const clamp01 = (value) => Math.min(1, Math.max(0, value));
+  const phrases = ['change of direction', 'rising traverse', 'setup and reach'];
+  function movementFit(points, phrase) {
+    // Work in board coordinates. A mirrored sequence has the same character.
+    const moves = points.slice(1).map((point, index) => {
+      const dx = point.x - points[index].x, dy = point.y - points[index].y;
+      return { dx, dy, length: Math.hypot(dx, dy) };
+    });
+    let best = 0;
+    for (let i = 1; i < moves.length; i++) {
+      const a = moves[i - 1], b = moves[i];
+      const width = clamp01(Math.min(Math.abs(a.dx), Math.abs(b.dx)) / 16);
+      let fit;
+      if (phrase === 'change of direction') {
+        fit = a.dx * b.dx < 0 ? width : 0;
+      } else if (phrase === 'rising traverse') {
+        fit = a.dx * b.dx > 0 ? width * clamp01((a.dy + b.dy) / 16) : 0;
+      } else {
+        // Look for contrasting beats, with a shorter move after the crux.
+        const reset = moves[i + 1];
+        fit = reset ? clamp01((b.length - a.length) / 14) * clamp01((b.length - reset.length) / 12) : 0;
+      }
+      best = Math.max(best, fit);
+    }
+    return best;
+  }
+  function handLine(holds, placements, plan) {
+    const points = (role) => holds.filter(([, r]) => r === role).map(([id]) => placements.get(String(id)));
+    const starts = points(roles.start);
+    const first = { x: 0, y: 0 };
+    for (const p of starts) { first.x += p.x / starts.length; first.y += p.y / starts.length; }
+    if (plan) {
+      const touched = new Set(holds.filter(([, r]) => r === roles.start).map(([id]) => String(id)));
+      const line = [first];
+      for (const step of plan.steps || []) {
+        const id = String(step.id);
+        if (!step.limb?.endsWith('Hand') || touched.has(id) || !placements.has(id)) continue;
+        touched.add(id);
+        line.push(placements.get(id));
+      }
+      return line;
+    }
+    return [first, ...points(roles.hand).sort((a,b) => a.y - b.y || a.x - b.x), ...points(roles.finish)];
+  }
+  function designTarget(line, pivot, phrase, side, grade) {
+    const before = line[pivot - 1], after = line[pivot + 1];
+    const mix = phrase === 'setup and reach' ? 0.28 : 0.5;
+    const bend = phrase === 'change of direction' ? side * (10 + grade * 0.6) : 0;
+    return { x: before.x + (after.x - before.x) * mix + bend, y: before.y + (after.y - before.y) * mix };
+  }
   function assess(holds, placements, options = {}) {
     const get = (id) => placements.get(String(id)) || placements.get(id);
     const starts = holds.filter(([, role]) => role === roles.start).map(([id]) => get(id)).filter(Boolean);
@@ -122,7 +172,8 @@
     const grades = [...routesByGrade.keys()].filter((grade) => /^V(?:[0-9]|10|11)$/.test(grade) && routesByGrade.get(grade).length).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
     if (!grades.length) throw new Error('No quality-checked TB2 community templates are available');
     for (const grade of grades) routesByGrade.get(grade).sort((a, b) => Number(b.quality || 0) - Number(a.quality || 0) || Number(b.ascents || 0) - Number(a.ascents || 0));
-    const seen = new Set();
+    const sourceSignatures = new Set([...data.routes, ...(data.generated || [])].filter(r => Array.isArray(r.holds)).map(r => signature(r.holds)));
+    const seen = new Set(), recentHands = [];
     const salt = options.salt ?? `${Date.now()}-${Math.random()}`;
     const weightedPick = (items, weight, rng) => {
       const weights = items.map((item) => Math.max(0.0001, weight(item)));
@@ -132,7 +183,7 @@
     };
     function styleFit(betaPlan, style) {
       if (!style || style === 'any') return 0;
-      const handMoves = (betaPlan?.steps || []).filter((step) => step.role === roles.hand || step.role === roles.finish)
+      const handMoves = (betaPlan?.steps || []).filter((step) => step.limb?.endsWith('Hand') && (step.role === roles.hand || step.role === roles.finish))
         .map((step) => Number(step.movementDistance)).filter(Number.isFinite);
       if (!handMoves.length) return 0;
       const meanDistance = handMoves.reduce((sum, distance) => sum + distance, 0) / handMoves.length;
@@ -142,36 +193,40 @@
         ? 0.55 * reach + 0.45 * longMoveShare
         : 1 - (0.55 * reach + 0.45 * longMoveShare);
     }
-    function generate({ grade = 'any', name = '', sequence = 0, style = 'any' } = {}) {
+    function choosePhrase(style, rng) {
+      if (style === 'dynamic' && rng() < 0.65) return 'setup and reach';
+      if (style === 'static' && rng() < 0.65) return phrases[Math.floor(rng() * 2)];
+      return phrases[Math.floor(rng() * phrases.length)];
+    }
+    function generate({ grade = 'any', name = '', sequence = 0, style = 'any', movementIntent } = {}) {
       const seed = hash(`${salt}|${name}|${grade}|${style}|${sequence}`);
       const rng = randomFrom(seed);
       const chosenGrade = grade === 'any' ? grades[Math.floor(rng() * grades.length)] : grade;
       const templates = routesByGrade.get(chosenGrade) || [];
       if (!templates.length) throw new Error(`No quality-checked TB2 templates for ${chosenGrade}`);
       const gradeFrequency = frequencyByGrade.get(chosenGrade) || { 6: new Map(), 8: new Map() };
-      // Rank a small pool of screened variants when the learned evaluator is
-      // available. Without a trained model, retain the original first-valid
-      // behavior so generation remains usable in offline/dev builds.
-      const rankAttempts = evaluator ? Math.max(1, Math.floor(options.rankAttempts ?? 10)) : 1;
+      const phrase = movementIntent || choosePhrase(style, rng);
+      const rankAttempts = Math.max(1, Math.floor(options.rankAttempts ?? 12));
       const ranked = [];
       const rankedSignatures = new Set();
-      // Try many local variants before moving to another highly-rated template.
+      const community = templates.filter((r) => r.templateKind !== 'ddpm');
+      const communityTemplates = community.slice(0, Math.max(30, Math.ceil(community.length * 0.75)));
+      const modelTemplates = templates.filter((r) => r.templateKind === 'ddpm');
       for (let attempt = 0; attempt < (options.attempts ?? 900); attempt++) {
-        const communityTemplates = templates.filter((r) => r.templateKind !== 'ddpm').slice(0, Math.max(30, Math.ceil(templates.filter((r) => r.templateKind !== 'ddpm').length * 0.75)));
-        const modelTemplates = templates.filter((r) => r.templateKind === 'ddpm');
         const useModelSeed = modelTemplates.length > 0 && (communityTemplates.length === 0 || rng() < (options.diffusionSeedRate ?? 0.7));
         const seedPool = useModelSeed ? modelTemplates : communityTemplates;
         const template = weightedPick(seedPool, (r) => (Number(r.quality || 2.4) + 0.25) ** 2 * Math.log2(Number(r.ascents || 3) + 2), rng);
         const holds = template.holds.map(([id, role]) => [Number(id), Number(role)]);
         const mutable = holds.map((pair, index) => ({ pair, index })).filter(({ pair }) => pair[1] === roles.hand || pair[1] === roles.foot);
         if (!mutable.length) continue;
-        // Change several contacts so successive variants don't feel like the
-        // same community route with a single hold swapped. Keep a meaningful
-        // share of one-contact edits for grades where the planner has fewer
-        // feasible alternatives.
+        // Shape an interior hand move first, then vary the holds around it.
+        const line = handLine(holds, placements);
+        const pivot = 1 + Math.floor(rng() * (line.length - 2));
+        const anchor = line[pivot];
+        const target = designTarget(line, pivot, phrase, rng() < 0.5 ? -1 : 1, Number(chosenGrade.slice(1)));
         const changeRoll = rng();
         const changeCount = changeRoll < 0.2 ? 1 : changeRoll < 0.72 ? 2 : 3;
-        const chosen = [];
+        const chosen = [mutable.find(({pair}) => String(pair[0]) === String(anchor.id))];
         while (chosen.length < Math.min(changeCount, mutable.length)) {
           const item = mutable[Math.floor(rng() * mutable.length)];
           if (!chosen.some((x) => x.index === item.index)) chosen.push(item);
@@ -191,7 +246,14 @@
           const replacement = weightedPick(candidates, (c) => {
             const newTier = c.p.difficulty?.handTier;
             const fit = role === roles.hand && Number.isInteger(oldTier) && Number.isInteger(newTier) ? Math.exp(-0.35 * Math.abs(newTier - oldTier)) : 1;
-            return fit * Math.sqrt(c.count) / (1 + c.d / 18);
+            let intentFit = 1;
+            if (old === anchor) {
+              intentFit = Math.exp(-Math.hypot(c.p.x - target.x, c.p.y - target.y) / 10);
+            } else if (role === roles.foot && Math.hypot(old.x - target.x, old.y - target.y + 24) <= 26) {
+              // Give the setter a foothold near the setup for this move.
+              intentFit = Math.exp(-Math.hypot(c.p.x - target.x, c.p.y - target.y + 24) / 22);
+            }
+            return intentFit * fit * Math.sqrt(c.count) / (1 + c.d / 18);
           }, rng);
           used.delete(String(pair[0]));
           used.add(String(replacement.id));
@@ -202,16 +264,22 @@
         const generatedHolds = style === 'dynamic' ? compactDynoHolds(holds, placements) : holds;
         if (!generatedHolds) continue;
         const key = signature(generatedHolds);
-        if (seen.has(key) || rankedSignatures.has(key) || !assess(generatedHolds, placements).ok) continue;
+        if (sourceSignatures.has(key) || seen.has(key) || rankedSignatures.has(key) || !assess(generatedHolds, placements).ok) continue;
         rankedSignatures.add(key);
         const evaluation = evaluator?.score(generatedHolds, placements, chosenGrade) || null;
-        ranked.push({ holds: generatedHolds, grade: chosenGrade, source: { grade: chosenGrade, style, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true, evaluation });
+        const middleIds = generatedHolds.filter(([, r]) => r === roles.hand).map(([id]) => id);
+        const repeat = Math.max(0, ...recentHands.map(last => middleIds.filter(id => last.has(id)).length / middleIds.length));
+        const fit = movementFit(handLine(generatedHolds, placements), phrase);
+        const setterScore = (evaluation?.rankScore ?? 0) + 0.65 * fit - 0.4 * repeat;
+        ranked.push({ holds: generatedHolds, grade: chosenGrade, source: { grade: chosenGrade, style, movementIntent: phrase, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true, evaluation, setterScore });
         if (ranked.length >= rankAttempts) break;
       }
       if (ranked.length) {
-        ranked.sort((a, b) => (b.evaluation?.rankScore ?? 0) - (a.evaluation?.rankScore ?? 0));
+        ranked.sort((a, b) => b.setterScore - a.setterScore);
         const chosen = ranked[0];
         seen.add(chosen.signature);
+        recentHands.push(new Set(chosen.holds.filter(([, r]) => r === roles.hand).map(([id]) => id)));
+        if (recentHands.length > 8) recentHands.shift();
         return chosen;
       }
       throw new Error(`Could not find a new quality-checked ${chosenGrade} variant after ${options.attempts ?? 900} attempts. Generate again.`);
@@ -219,16 +287,21 @@
     async function generatePlayable(request, validate, config = {}) {
       const checks = config.maxChecks ?? 6;
       const style = request.style || 'any';
+      const rng = randomFrom(hash(`${salt}|${request.name}|${request.grade}|${style}|${request.sequence}|phrase`));
+      const movementIntent = choosePhrase(style, rng);
+      const grade = !request.grade || request.grade === 'any' ? grades[Math.floor(rng() * grades.length)] : request.grade;
       let best = null, playableCount = 0;
       for (let attempt = 0; attempt < checks; attempt++) {
-        const candidate = generate({ ...request, sequence: Number(request.sequence || 0) * checks + attempt });
+        const candidate = generate({ ...request, grade, movementIntent, sequence: Number(request.sequence || 0) * checks + attempt });
         config.onProgress?.(attempt + 1, checks);
         const betaPlan = await validate(candidate, attempt);
         if (betaPlan?.ok) {
-          const result = { ...candidate, betaPlan, checksPerformed: attempt + 1, styleFit: styleFit(betaPlan, style) };
-          if (style === 'any') return result;
+          const actualFit = movementFit(handLine(candidate.holds, placements, betaPlan), movementIntent);
+          const result = { ...candidate, betaPlan, checksPerformed: attempt + 1, movementFit: actualFit, styleFit: styleFit(betaPlan, style) };
           playableCount++;
-          if (!best || result.styleFit > best.styleFit) best = result;
+          const playableScore = r => (r.evaluation?.rankScore ?? 0) + 0.8 * r.movementFit + r.styleFit;
+          if (!best || playableScore(result) > playableScore(best)) best = result;
+          if (actualFit >= 0.8 && style === 'any') break;
           if (playableCount >= (config.styleCandidates ?? 3)) break;
         }
       }
@@ -237,5 +310,5 @@
     }
     return { generate, generatePlayable, grades, countGenerated: () => seen.size, assess: (holds) => assess(holds, placements) };
   }
-  return { create, assess, signature };
+  return { create, assess, signature, movementFit };
 });

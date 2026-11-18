@@ -40,13 +40,40 @@ test('planner is deterministic on a bundled TB2 community route', () => {
   assert.ok(a.steps.every((step) => step.pose?.points && step.contacts?.[step.limb] === String(step.id)));
   assert.ok(a.expanded <= options.maxExpanded);
   assert.ok(a.steps.some((s) => s.limb.endsWith('Foot')));
+  const finish = String(problem.holds.find(h => h.role === 7).id);
+  assert.equal(a.finalContacts.leftHand, finish);
+  assert.equal(a.finalContacts.rightHand, finish);
+});
+
+test('beta starts on marked toes, covers each hand move, and controls both finish holds', () => {
+  const specs = [
+    ['start', 5, 0, 32], ['lf', 8, -10, 8], ['rf', 8, 10, 8],
+    ['middle', 6, -8, 48], ['finishL', 7, -14, 60], ['finishR', 7, 14, 60],
+  ];
+  const placements = new Map(specs.map(([id, , x, y]) => [id, { id, x, y }]));
+  const route = { holds: specs.map(([id, role]) => ({ id, role })) };
+  const plan = Planner.plan(route, placements);
+  assert.ok(plan.ok, plan.reason);
+  assert.equal(plan.initialContacts.leftFoot, 'lf');
+  assert.equal(plan.initialContacts.rightFoot, 'rf');
+  const middle = plan.steps.findIndex(s => s.id === 'middle' && s.limb.endsWith('Hand'));
+  const firstFinish = plan.steps.findIndex(s => s.role === 7);
+  assert.ok(middle >= 0 && middle < firstFinish);
+  assert.deepEqual(new Set([plan.finalContacts.leftHand, plan.finalContacts.rightHand]), new Set(['finishL', 'finishR']));
+  let contacts = plan.initialContacts;
+  for (const step of plan.steps) {
+    assert.equal(Object.keys(contacts).filter(l => contacts[l] !== step.contacts[l]).length, 1);
+    assert.ok(Number.isFinite(step.releaseSupportDistance));
+    contacts = step.contacts;
+  }
 });
 
 test('planner reports impossible route instead of substituting candidate plan', () => {
   const placements = new Map([
-    ['s', { id: 's', x: 0, y: 4 }], ['h', { id: 'h', x: 0, y: 18 }], ['f', { id: 'f', x: 60, y: 140 }],
+    ['s', { id: 's', x: 0, y: 24 }], ['h', { id: 'h', x: 0, y: 40 }], ['f', { id: 'f', x: 60, y: 140 }],
+    ['foot', { id: 'foot', x: 2, y: 4 }],
   ]);
-  const result = Planner.plan({ holds: [{ id: 's', role: 5 }, { id: 'h', role: 6 }, { id: 'f', role: 7 }], plan: [{ id: 'f', limb: 'R hand', role: 7 }] }, placements, { maxExpanded: 80, beamWidth: 12 });
+  const result = Planner.plan({ holds: [{ id: 's', role: 5 }, { id: 'foot', role: 8 }, { id: 'h', role: 6 }, { id: 'f', role: 7 }], plan: [{ id: 'f', limb: 'R hand', role: 7 }] }, placements, { maxExpanded: 80, beamWidth: 12 });
   assert.equal(result.ok, false);
   assert.match(result.reason, /No contact sequence/);
   assert.equal(result.steps, undefined);
