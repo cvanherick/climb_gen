@@ -1,10 +1,11 @@
 /* Lightweight inference for a learned TB2 grade and community-quality model. */
 (function attach(root, factory) {
-  const api = factory(() => root?.CLIMBGEN_ROUTE_EVALUATOR || null);
+  const spectrum = root.ClimbGenHoldSpectrum || (typeof require === 'function' ? require('./hold_spectrum') : null);
+  const api = factory(() => root?.CLIMBGEN_ROUTE_EVALUATOR || null, spectrum);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.ClimbGenRouteEvaluator = api;
-})(typeof globalThis === 'object' ? globalThis : this, (getModel) => {
-  const FEATURE_NAMES = ['starts', 'hands', 'finishes', 'feet', 'handMeanX', 'handMeanY', 'handSpanX', 'handSpanY', 'routeMeanX', 'routeMeanY', 'routeSpanX', 'routeSpanY', 'handPairMean', 'nearestMean', 'finishProgress', 'bboxDensity'];
+})(typeof globalThis === 'object' ? globalThis : this, (getModel, spectrum) => {
+  const FEATURE_NAMES = ['starts', 'hands', 'finishes', 'feet', 'handMeanX', 'handMeanY', 'handSpanX', 'handSpanY', 'routeMeanX', 'routeMeanY', 'routeSpanX', 'routeSpanY', 'handPairMean', 'nearestMean', 'finishProgress', 'bboxDensity', ...(spectrum?.FEATURE_NAMES || [])];
   function featureVector(holds, placements) {
     const lookup = (id) => placements instanceof Map ? placements.get(String(id)) || placements.get(id) : placements?.[String(id)];
     const points = (holds || []).map((entry) => {
@@ -25,10 +26,11 @@
       return distances.length ? Math.min(...distances) : NaN;
     }).filter(Number.isFinite);
     const bboxArea = Math.max(1, span(active, 'x') * span(active, 'y'));
-    return [starts.length, hands.length, finishes.length, feet.length, mean(hands, 'x'), mean(hands, 'y'), span(hands, 'x'), span(hands, 'y'), mean(active, 'x'), mean(active, 'y'), span(active, 'x'), span(active, 'y'), pairCount ? pairTotal / pairCount : 0, nearestDistances.length ? nearestDistances.reduce((a, b) => a + b, 0) / nearestDistances.length : 0, mean(finishes, 'y') - mean(starts, 'y'), points.length / bboxArea];
+    return [starts.length, hands.length, finishes.length, feet.length, mean(hands, 'x'), mean(hands, 'y'), span(hands, 'x'), span(hands, 'y'), mean(active, 'x'), mean(active, 'y'), span(active, 'x'), span(active, 'y'), pairCount ? pairTotal / pairCount : 0, nearestDistances.length ? nearestDistances.reduce((a, b) => a + b, 0) / nearestDistances.length : 0, mean(finishes, 'y') - mean(starts, 'y'), points.length / bboxArea, ...(spectrum?.routeFeatures(holds, placements) || [])];
   }
   function create(model = getModel()) {
     if (!model?.featureNames || !model?.gradeWeights || !model?.qualityWeights) return null;
+    if (model.featureNames.length !== FEATURE_NAMES.length || model.featureNames.some((name,i)=>name!==FEATURE_NAMES[i])) return null;
     const gradeLabels = model.gradeLabels || [];
     function predict(holds, placements) {
       const raw = featureVector(holds, placements);

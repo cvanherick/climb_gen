@@ -1,0 +1,139 @@
+{
+  "seed": 2026,
+  "split": "same 80/20 route permutation for both evaluator models",
+  "validationRoutes": 603,
+  "handKnown": 364,
+  "handUnknown": 134,
+  "footKnown": 98,
+  "labelsProvisional": true,
+  "geometryBaseline": {
+    "gradeExactAccuracy": 0.19402985074626866,
+    "gradeMeanAbsoluteError": 1.5239277834520832,
+    "gradePriorMeanAbsoluteError": 1.8403347865625517,
+    "qualityMeanAbsoluteError": 0.10699814229679781,
+    "qualityPriorMeanAbsoluteError": 0.11233291822332916,
+    "qualityLabelRange": [
+      2.4,
+      3.0
+    ],
+    "validationRoutes": 603
+  },
+  "spectrumEvaluator": {
+    "gradeExactAccuracy": 0.2620232172470978,
+    "gradeMeanAbsoluteError": 1.0948182244450697,
+    "gradePriorMeanAbsoluteError": 1.8403347865625517,
+    "qualityMeanAbsoluteError": 0.10624618095621813,
+    "qualityPriorMeanAbsoluteError": 0.11233291822332916,
+    "qualityLabelRange": [
+      2.4,
+      3.0
+    ],
+    "validationRoutes": 603
+  },
+  "diffusion": {
+    "type": "grade-conditional DDPM with hold-spectrum context",
+    "hold_context_features": [
+      "handEasy",
+      "handIntermediate",
+      "handAdvanced",
+      "handHard",
+      "handKnown",
+      "footBest",
+      "footWorst",
+      "footDirectionSpread",
+      "footKnown",
+      "wood",
+      "markerCos",
+      "markerSin"
+    ],
+    "hold_spectrum_provisional": true,
+    "hold_spectrum_sha256": "e9ac7adfa09b2b209057c0ccae9716922775440b5d6600f7c83e940d967ef5b6",
+    "training_routes": 3012,
+    "validation_noise_loss": 0.862128,
+    "timesteps": 24,
+    "grades": [
+      "V0",
+      "V1",
+      "V2",
+      "V3",
+      "V4",
+      "V5",
+      "V6",
+      "V7",
+      "V8",
+      "V9",
+      "V10",
+      "V11"
+    ],
+    "diffusion_routes_by_grade": {
+      "V0": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V1": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V2": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V3": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V4": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V5": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V6": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V7": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V8": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V9": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V10": {
+        "diffusion": 8,
+        "total": 10
+      },
+      "V11": {
+        "diffusion": 8,
+        "total": 10
+      }
+    },
+    "model_sha256": "7c06daaac3d0523079f68b4826bbd7dfcfc1f6ae8d936d335cba4df9c574dbf0",
+    "grade_conditioning": "learned grade embedding; macro validation; inverse-sqrt grade sampling; CFG scale 2.2",
+    "training_routes_by_grade": {
+      "V0": 19,
+      "V1": 71,
+      "V2": 75,
+      "V3": 230,
+      "V4": 365,
+      "V5": 449,
+      "V6": 394,
+      "V7": 384,
+      "V8": 403,
+      "V9": 179,
+      "V10": 93,
+      "V11": 49
+    }
+  },
+  "checkpoint": "models/tb2-spectrum-diffusion.pt",
+  "checkpointSha256": "7c06daaac3d0523079f68b4826bbd7dfcfc1f6ae8d936d335cba4df9c574dbf0",
+  "epochs": 50,
+  "spectrumSha256": "e9ac7adfa09b2b209057c0ccae9716922775440b5d6600f7c83e940d967ef5b6"
+}

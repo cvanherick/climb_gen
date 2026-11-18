@@ -1,10 +1,11 @@
 /* Two-dimensional articulated climber model. This is a geometric approximation,
    not a force, friction, collision, or real-world stability simulator. */
 (function attach(root, factory) {
-  const api = factory();
+  const spectrum = root.ClimbGenHoldSpectrum || (typeof require === 'function' ? require('./hold_spectrum') : null);
+  const api = factory(spectrum);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.ClimbGenIK = api;
-})(typeof globalThis === 'object' ? globalThis : this, () => {
+})(typeof globalThis === 'object' ? globalThis : this, (spectrum) => {
   const DEFAULT_BODY = Object.freeze({
     upperArm: 18, lowerArm: 18,
     upperLeg: 19, lowerLeg: 18,
@@ -108,7 +109,7 @@
   function scoreTorso(torso, contacts, placements, previous, body, overhangDeg) {
     let reachSquared = 0, angleSquared = 0, maxReachViolation = 0, maxAngleViolation = 0;
     const points = {};
-    let directionCost = 0, directionContacts = 0, reviewedContacts = 0;
+    let directionCost = 0, directionContacts = 0, reviewedContacts = 0, footDifficultyCost = 0, handDifficultyCost = 0;
     for (const [limb, id] of Object.entries(contacts)) {
       if (id == null) continue;
       const target = lookup(placements, id);
@@ -125,6 +126,11 @@
         if (direction.weight === 1) reviewedContacts++;
       }
       const reachViolation = segmentViolation(a, b, d);
+      if (LIMBS[limb].kind === 'leg') footDifficultyCost += spectrum?.footDifficulty(target, root).cost || 0;
+      const difficulty = target.difficulty;
+      if (LIMBS[limb].kind === 'arm' && Number.isInteger(difficulty?.handTier)) {
+        handDifficultyCost += difficulty.handConfidence * (difficulty.handTier / 3) * (0.4 + 0.6 * Math.min(1, d / (a + b)));
+      }
       const angle = jointAngleDeg(a, b, Math.max(1e-5, d));
       const spec = LIMBS[limb];
       const minAngle = spec.kind === 'arm' ? body.elbowMinDeg : body.kneeMinDeg;
@@ -151,8 +157,8 @@
       + ((torso.hipTheta || 0) / body.hipAngleLimit) ** 2 * 0.1
       + ((torso.theta - (torso.hipTheta || 0)) / 0.7) ** 2 * 0.12;
     return {
-      cost: reachSquared * 12 + angleSquared * 4 + supportCost * 2.4 + effort * 0.12 + orientationCost + directionCost * 3,
-      maxReachViolation, maxAngleViolation, supportCost, directionCost, directionContacts, reviewedContacts, com, hull, points,
+      cost: reachSquared * 12 + angleSquared * 4 + supportCost * 2.4 + effort * 0.12 + orientationCost + directionCost * 3 + footDifficultyCost * 0.35 + handDifficultyCost * 0.25,
+      maxReachViolation, maxAngleViolation, supportCost, directionCost, footDifficultyCost, handDifficultyCost, directionContacts, reviewedContacts, com, hull, points,
       reachable: maxReachViolation < 0.1,
       kinematic: maxReachViolation < 0.1 && maxAngleViolation < 0.1,
     };
@@ -251,6 +257,8 @@
         stabilityCost: diagnostics.supportCost,
         estimatedCost: diagnostics.cost,
         holdDirectionCost: diagnostics.directionCost,
+        footDifficultyCost: diagnostics.footDifficultyCost,
+        handDifficultyCost: diagnostics.handDifficultyCost,
         directionContacts: diagnostics.directionContacts,
         reviewedDirectionContacts: diagnostics.reviewedContacts,
         reachable: diagnostics.reachable,

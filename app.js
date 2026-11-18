@@ -227,7 +227,7 @@
         : currentProblem.style === 'static' ? ' · static, shorter controlled reaches' : '';
       $('route-copy').textContent = `${currentProblem.holds.length} holds · fresh ${currentProblem.source.grade} variant${styleReadout} · based on ${baseLabel}`;
       $('sequence-list').replaceChildren(...result.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
-      $('planner-diagnostics').textContent = JSON.stringify({ expandedStates: result.expanded, invalidTransitions: result.invalidTransitions, planningTimeMs: result.elapsedMs, weightedCost: Number(result.cost.toFixed(2)), holdDirectionCost: result.diagnostics.maxHoldDirectionCost, movementTypes: [...new Set(result.steps.map((step) => step.movementType))], feasibility: { geometry: result.diagnostics.maxReachViolation < 0.25 ? 'modeled limb reach satisfied' : 'reach warning', kinematics: result.diagnostics.maxAngleViolationDeg < 1 && result.diagnostics.maxSegmentResidual < 0.1 ? 'modeled joint and segment limits satisfied' : 'pose warning', stability: 'heuristic estimate only', physical: 'unverified; no force, friction, grip, collision, or fall simulation' }, centerOfMassApproximation: result.initialPose.diagnostics.centerOfMass, supportPolygonApproximation: result.initialPose.diagnostics.supportHull, approximateStabilityCost: result.diagnostics.maxEstimatedStabilityCost, maxReachViolation: result.diagnostics.maxReachViolation, maxJointAngleLimitViolationDeg: result.diagnostics.maxAngleViolationDeg, maxTwoSegmentLengthResidual: result.diagnostics.maxSegmentResidual }, null, 2);
+      $('planner-diagnostics').textContent = JSON.stringify({ expandedStates: result.expanded, invalidTransitions: result.invalidTransitions, planningTimeMs: result.elapsedMs, weightedCost: Number(result.cost.toFixed(2)), holdDirectionCost: result.diagnostics.maxHoldDirectionCost, holdDifficultySource: 'provisional manufacturer-chart tiers; grade model uses community route labels', movementTypes: [...new Set(result.steps.map((step) => step.movementType))], feasibility: { geometry: result.diagnostics.maxReachViolation < 0.25 ? 'modeled limb reach satisfied' : 'reach warning', kinematics: result.diagnostics.maxAngleViolationDeg < 1 && result.diagnostics.maxSegmentResidual < 0.1 ? 'modeled joint and segment limits satisfied' : 'pose warning', stability: 'heuristic estimate only', physical: 'unverified; no force, friction, grip, collision, or fall simulation' }, centerOfMassApproximation: result.initialPose.diagnostics.centerOfMass, supportPolygonApproximation: result.initialPose.diagnostics.supportHull, approximateStabilityCost: result.diagnostics.maxEstimatedStabilityCost, maxReachViolation: result.diagnostics.maxReachViolation, maxJointAngleLimitViolationDeg: result.diagnostics.maxAngleViolationDeg, maxTwoSegmentLengthResidual: result.diagnostics.maxSegmentResidual }, null, 2);
       $('planner-debug').hidden = false;
       $('playback-controls').hidden = false;
       button.disabled = false;
@@ -353,6 +353,10 @@
       crop.style.backgroundPosition = `${-(profile.atlasIndex % 16) * 64}px ${-Math.floor(profile.atlasIndex / 16) * 64}px`;
       crop.setAttribute('aria-label', `Screenshot crop of hold #${hold.id}`);
       $('hold-profile-info').textContent = `${profile.material} · ${profile.unknown ? 'direction unresolved' : profile.verified ? 'reviewed direction' : 'low-confidence direction estimate'}. No measured grip strength.`;
+      const difficulty = hold.difficulty;
+      const tiers = ['Easy','Intermediate','Advanced','Hard'];
+      if (difficulty) $('hold-profile-info').textContent += ` Shape ${difficulty.shape}. Hand tier: ${difficulty.handTier == null ? 'unknown' : tiers[difficulty.handTier] + ' (chart-derived)'}.` ;
+      if (difficulty?.footApproaches?.length) $('hold-profile-info').textContent += ` Foot tier varies by approach: ${[...new Set(difficulty.footApproaches.map(a=>tiers[a.tier]))].join(' / ')} (provisional).`;
     };
     const refresh = () => {
       holdProfileRevision++;
@@ -726,6 +730,7 @@
     dataset = window.CLIMBGEN_DATA;
     if (!dataset?.placements?.length || !dataset?.routes?.length) throw new Error('Bundled TB2 data is missing');
     for (const hold of dataset.placements) holdMap.set(String(hold.id), hold);
+    ClimbGenHoldSpectrum.apply(holdMap);
     initHoldProfiles();
     routeGenerator = ClimbGenRouteGenerator.create(dataset);
     $('route-copy').textContent = `${dataset.filtered_routes.toLocaleString()} real TB2 climbs`;

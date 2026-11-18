@@ -97,6 +97,7 @@
     return visit(left, right, hands, initialStartY);
   }
   function create(data, options = {}) {
+    root.ClimbGenHoldSpectrum?.apply(data.placements);
     const placements = new Map(data.placements.map((p) => [String(p.id), p]));
     const evaluatorApi = root.ClimbGenRouteEvaluator || (typeof require === 'function' ? require('./route_evaluator') : null);
     const evaluator = options.evaluator || evaluatorApi?.create?.();
@@ -186,7 +187,12 @@
             return { id: Number(id), count, d, p };
           }).filter((c) => c.p && !used.has(String(c.id)) && c.d >= 4 && c.d <= 25);
           if (!candidates.length) continue;
-          const replacement = weightedPick(candidates, (c) => Math.sqrt(c.count) / (1 + c.d / 18), rng);
+          const oldTier = old.difficulty?.handTier;
+          const replacement = weightedPick(candidates, (c) => {
+            const newTier = c.p.difficulty?.handTier;
+            const fit = role === roles.hand && Number.isInteger(oldTier) && Number.isInteger(newTier) ? Math.exp(-0.35 * Math.abs(newTier - oldTier)) : 1;
+            return fit * Math.sqrt(c.count) / (1 + c.d / 18);
+          }, rng);
           used.delete(String(pair[0]));
           used.add(String(replacement.id));
           holds[index] = [replacement.id, role];

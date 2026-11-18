@@ -17,10 +17,11 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+from hold_spectrum import hold_context, CONTEXT_NAMES, SPECTRUM
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT / "data/tb2-mirror-40.js"
-MODEL_PATH = ROOT / "models/tb2-grade-diffusion.pt"
+MODEL_PATH = ROOT / "models/tb2-spectrum-diffusion.pt"
 PREFIX = "window.CLIMBGEN_DATA = "
 GRADES = [f"V{i}" for i in range(12)]
 ROLE_ORDER = (5, 6, 7, 8)  # start, hand, finish, foot
@@ -47,11 +48,12 @@ class ResidualBlock(nn.Module):
 
 
 class GradeConditionalDenoiser(nn.Module):
-    def __init__(self, hold_count, width=320):
+    def __init__(self, hold_count, context, width=320):
         super().__init__()
         self.hold_count = hold_count
+        self.register_buffer("hold_context", torch.as_tensor(context, dtype=torch.float32))
         self.grade_embedding = nn.Embedding(len(GRADES) + 1, 24)
-        self.input = nn.Linear(hold_count * len(ROLE_ORDER) + 56, width)
+        self.input = nn.Linear(hold_count * len(ROLE_ORDER) + 56 + len(ROLE_ORDER) * len(CONTEXT_NAMES), width)
         self.blocks = nn.ModuleList([ResidualBlock(width) for _ in range(3)])
         self.output_norm = nn.LayerNorm(width)
         self.output = nn.Linear(width, hold_count * len(ROLE_ORDER))
@@ -69,6 +71,7 @@ class GradeConditionalDenoiser(nn.Module):
             x,
             self.time_embedding(timestep),
             self.grade_embedding(grade),
+            (x.reshape(-1, self.hold_count, len(ROLE_ORDER)).transpose(1, 2) @ self.hold_context / math.sqrt(self.hold_count)).flatten(1),
         ], dim=1)
         h = F.silu(self.input(conditioned))
         for block in self.blocks:
@@ -310,7 +313,7 @@ def train_model(data, epochs, seed):
     x_valid = torch.tensor(x[validation_idx], device=device)
     g_valid = torch.tensor(grades[validation_idx], device=device)
 
-    model = GradeConditionalDenoiser(len(placements)).to(device)
+    model = GradeConditionalDenoiser(len(placements), hold_context(placements)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=2.0e-4, weight_decay=1.0e-4)
     betas = torch.linspace(1.0e-4, 0.02, NUM_STEPS, device=device)
     alphas = 1.0 - betas
@@ -427,6 +430,9 @@ def main():
     args.model_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
         "state_dict": model.state_dict(),
+        "hold_context_features": CONTEXT_NAMES,
+        "hold_spectrum_provisional": True,
+        "hold_spectrum_sha256": hashlib.sha256((ROOT / "data/tb2-hold-spectrum.js").read_bytes()).hexdigest(),
         "hold_ids": [int(hold["id"]) for hold in data["placements"]],
         "grades": GRADES,
         "timesteps": NUM_STEPS,
@@ -517,7 +523,10 @@ def main():
 
     data["generated"] = conditioned_pool
     data["generator"] = {
-        "type": "grade-conditional DDPM",
+        "type": "grade-conditional DDPM with hold-spectrum context",
+        "hold_context_features": CONTEXT_NAMES,
+        "hold_spectrum_provisional": True,
+        "hold_spectrum_sha256": hashlib.sha256((ROOT / "data/tb2-hold-spectrum.js").read_bytes()).hexdigest(),
         "training_routes": sum(len(routes_by_grade[grade]) for grade in GRADES),
         "validation_noise_loss": round(validation_loss, 6),
         "timesteps": NUM_STEPS,

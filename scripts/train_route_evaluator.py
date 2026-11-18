@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 
 import numpy as np
+from hold_spectrum import FEATURE_NAMES as SPECTRUM_FEATURES, route_features, SPECTRUM
 
 ROOT = Path(__file__).resolve().parents[1]
 FEATURE_NAMES = ["starts", "hands", "finishes", "feet", "handMeanX", "handMeanY", "handSpanX", "handSpanY", "routeMeanX", "routeMeanY", "routeSpanX", "routeSpanY", "handPairMean", "nearestMean", "finishProgress", "bboxDensity"]
+FEATURE_NAMES += SPECTRUM_FEATURES
 GRADES = [f"V{i}" for i in range(12)]
 
 
@@ -40,18 +42,21 @@ def features(route, placement_map):
         distances = [float(np.hypot(a["x"] - b["x"], a["y"] - b["y"])) for j, b in enumerate(hands) if i != j]
         if distances:
             nearest.append(min(distances))
-    return [len(starts), len(hands), len(finishes), len(feet), mean(hands, "x"), mean(hands, "y"), span(hands, "x"), span(hands, "y"), mean(active, "x"), mean(active, "y"), span(active, "x"), span(active, "y"), float(np.mean(pairwise)) if pairwise else 0.0, float(np.mean(nearest)) if nearest else 0.0, mean(finishes, "y") - mean(starts, "y"), len(pts) / max(1.0, span(active, "x") * span(active, "y"))]
+    return [len(starts), len(hands), len(finishes), len(feet), mean(hands, "x"), mean(hands, "y"), span(hands, "x"), span(hands, "y"), mean(active, "x"), mean(active, "y"), span(active, "x"), span(active, "y"), float(np.mean(pairwise)) if pairwise else 0.0, float(np.mean(nearest)) if nearest else 0.0, mean(finishes, "y") - mean(starts, "y"), len(pts) / max(1.0, span(active, "x") * span(active, "y"))] + route_features(route, placement_map)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--epochs", type=int, default=1400)
+    parser.add_argument('--geometry-only', action='store_true')
+    parser.add_argument('--output', type=Path, default=ROOT / 'data/tb2-route-evaluator.js')
     args = parser.parse_args()
+    feature_names = FEATURE_NAMES[:16] if args.geometry_only else FEATURE_NAMES
     data = load_data()
     placements = {int(p["id"]): p for p in data["placements"]}
     routes = [r for r in data["routes"] if r.get("grade") in GRADES and r.get("quality") is not None and len(r.get("holds", [])) >= 3]
-    x = np.asarray([features(r, placements) for r in routes], dtype=np.float64)
+    x = np.asarray([features(r, placements)[:len(feature_names)] for r in routes], dtype=np.float64)
     y_grade = np.asarray([GRADES.index(r["grade"]) for r in routes], dtype=np.int64)
     y_quality = np.asarray([float(r["quality"]) for r in routes], dtype=np.float64)
     rng = np.random.default_rng(args.seed)
@@ -105,7 +110,7 @@ def main():
         "validationRoutes": int(len(valid)),
     }
     model = {
-        "featureNames": FEATURE_NAMES,
+        "featureNames": feature_names,
         "featureMean": mean.tolist(),
         "featureScale": scale.tolist(),
         "gradeLabels": GRADES,
@@ -113,10 +118,10 @@ def main():
         "gradeBias": b.tolist(),
         "qualityWeights": coef[:-1].tolist(),
         "qualityBias": float(coef[-1]),
-        "metadata": {"trainingRoutes": int(len(train)), "validationRoutes": int(len(valid)), "ratingsAreCommunityScores": True, "negativeExamples": "None. Bundled BoardLib slice is quality-filtered; this model only estimates ratings within that accepted pool and cannot reliably identify bad generated routes.", "metrics": metrics},
+        "metadata": {"trainingRoutes": int(len(train)), "validationRoutes": int(len(valid)), "ratingsAreCommunityScores": True, "holdSpectrum": None if args.geometry_only else {"schemaVersion": 1, "provisional": True, "knownHandHolds": sum(h["handTier"] is not None for h in SPECTRUM["holds"].values())}, "negativeExamples": "None. Bundled BoardLib slice is quality-filtered; this model only estimates ratings within that accepted pool and cannot reliably identify bad generated routes.", "metrics": metrics},
     }
     script = "window.CLIMBGEN_ROUTE_EVALUATOR = " + json.dumps(model, separators=(",", ":")) + ";\n"
-    out = ROOT / "data/tb2-route-evaluator.js"
+    out = args.output
     out.write_text(script)
     print(json.dumps({"output": str(out), "trainingRoutes": len(train), "validationRoutes": len(valid), "gradeCounts": {grade: int(np.sum(y_grade[train] == i)) for i, grade in enumerate(GRADES)}, "metrics": metrics}, indent=2))
 

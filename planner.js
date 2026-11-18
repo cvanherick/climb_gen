@@ -124,7 +124,7 @@
             const movementQualityPenalty = crossPenalty + highFootPenalty + lungeBias;
             const next = {
               contacts, initialContacts: current.initialContacts, visited, pose, depth: depth + 1,
-              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + (diag.holdDirectionCost || 0) * 0.6 + repeatsLimb + movementQualityPenalty,
+              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + (diag.holdDirectionCost || 0) * 0.6 + (diag.footDifficultyCost || 0) * 0.15 + (diag.handDifficultyCost || 0) * 0.1 + repeatsLimb + movementQualityPenalty,
               path: [...current.path, { limb, label: labels[limb], movementType, movementDistance: movement, movementQualityPenalty, id: target.id, role: target.role, contacts, pose, diagnostics: diag }],
             };
             const key = keyOf(next), previousCost = seen.get(key);

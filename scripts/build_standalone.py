@@ -7,6 +7,8 @@ template = (ROOT / "index.shell.html").read_text()
 styles = (ROOT / "styles.css").read_text()
 dataset = (ROOT / "data/tb2-mirror-40.js").read_text()
 route_evaluator_data = (ROOT / "data/tb2-route-evaluator.js").read_text()
+spectrum = (ROOT / "data/tb2-hold-spectrum.js").read_text()
+spectrum_api = (ROOT / "hold_spectrum.js").read_text()
 profiles = (ROOT / "data/tb2-hold-profiles.js").read_text()
 hold_profiles = (ROOT / "hold_profiles.js").read_text()
 app = (ROOT / "app.js").read_text()
@@ -23,8 +25,8 @@ image_data = {
 image_data["holdAtlas"] = "data:image/webp;base64," + base64.b64encode((ROOT / "assets/tb2-hold-crops-atlas.webp").read_bytes()).decode("ascii")
 replacements = {
     "<!-- INLINE_STYLES -->": f"<style>\n{styles}\n</style>",
-    "<!-- INLINE_DATA -->": f"<script>\n{dataset}\n{profiles}\n{route_evaluator_data}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
-    "<!-- INLINE_MODELS -->": f"<script>\n{hold_profiles}\n{route_evaluator}\n{route_generator}\n{models}\n{photo_suggestions}\n{photo_hold_detector}\n</script>",
+    "<!-- INLINE_DATA -->": f"<script>\n{dataset}\n{spectrum}\n{profiles}\n{route_evaluator_data}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
+    "<!-- INLINE_MODELS -->": f"<script>\n{spectrum_api}\n{hold_profiles}\n{route_evaluator}\n{route_generator}\n{models}\n{photo_suggestions}\n{photo_hold_detector}\n</script>",
     "<!-- INLINE_APP -->": f"<script>\n{app}\n</script>",
 }
 for marker, content in replacements.items():
