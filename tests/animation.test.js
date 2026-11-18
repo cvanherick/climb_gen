@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const Planner = require('../planner');
 const Animation = require('../animation');
 const IK = require('../ik');
+const Board = require('../board_3d');
 function fixture() {
   const context = { window: {} };
   vm.runInNewContext(fs.readFileSync(require.resolve('../data/tb2-mirror-40.js'), 'utf8'), context);
@@ -20,6 +21,8 @@ test('sampled playback retains planted anchors, stable bend directions and fixed
   let maxJointStep = 0;
   for (let t = 0; t < timeline.duration; t += 1000 / 60) {
     const frame = timeline.sample(t), pose = frame.pose, segment = timeline.segments[frame.stepIndex];
+    const pelvis = Board.toWorld([pose.torso.x, pose.torso.y, pose.depth.pelvis]);
+    assert.ok(pelvis[1] >= 4.499);
     for (const limb of Object.keys(segment.contacts)) {
       if (limb === segment.step.limb) continue;
       const expected = placements.get(segment.contacts[limb]);
@@ -94,7 +97,12 @@ test('a hand reach loads a shoe before release, and a foot lifts between raised 
   assert.equal(loaded.depth.rightHand, depths.rh);
   assert.ok(loaded.torso.x > 1 && loaded.torso.y < stance.y);
   assert.ok(loaded.depth.rightHip < loaded.depth.leftHip && loaded.depth.pelvis < sample(reach, 0).depth.pelvis);
-  assert.ok(airborne.torso.theta > 0 && airborne.torso.hipTheta < 0);
+  assert.ok(airborne.torso.theta > 0);
+  assert.equal(airborne.torso.hipTheta, loaded.torso.hipTheta, 'a hand reach should not swivel the pelvis');
+  assert.equal(airborne.torso.space.hipYaw, loaded.torso.space.hipYaw);
+  assert.deepEqual(airborne.feet.right.heel, loaded.feet.right.heel);
+  assert.ok(sample(reach, 0).diagnostics.centerOfMass.z > 11);
+  assert.ok(sample(reach, 0).depth.pelvis > sample(reach, 0).depth.neck);
   assert.ok(airborne.motion.airborne && airborne.motion.grip < 0.5);
   assert.ok(airborne.depth.rightHand > depths.nextHand);
   assert.deepEqual(airborne.diagnostics.supportHull, IK.convexHull([wall.lh, wall.lf, wall.rf]));
@@ -103,7 +111,28 @@ test('a hand reach loads a shoe before release, and a foot lifts between raised 
   assert.deepEqual(stepping.points.rightFoot, wall.rf);
   assert.equal(stepping.depth.rightFoot, depths.rf);
   assert.ok(stepping.depth.leftFoot > depths.nextFoot);
+  assert.deepEqual(stepping.feet.right.ankle, loaded.feet.right.ankle);
+  assert.ok(Math.abs(stepping.torso.space.hipYaw - loaded.torso.space.hipYaw) < 0.12);
   assert.ok(stepping.points.leftFoot.y > (wall.lf.y + wall.nextFoot.y) / 2 + 1);
   assert.deepEqual(sample(step, 1).points.leftFoot, wall.nextFoot);
   assert.equal(sample(step, 1).depth.leftFoot, depths.nextFoot);
+  const balance = IK.supportForces(stepping);
+  const gravity = Board.toWorld(Object.values(balance.gravity));
+  assert.ok(Math.abs(gravity[2]) < 1e-9 && Math.abs(gravity[1] + 1) < 1e-9);
+  assert.deepEqual(balance.contacts.map(c => c.limb), ['leftHand', 'rightHand', 'rightFoot']);
+  assert.ok(balance.contacts.every(({ limb, force }) => limb.endsWith('Foot') ? force.z >= 0 : force.z <= 0));
+  assert.ok(Number.isFinite(balance.forceResidual) && Number.isFinite(balance.torqueResidual));
+});
+
+test('hold forces oppose gravity and its turning moment in a supported hang', () => {
+  const pose = {
+    diagnostics: { centerOfMass: { x: 0, y: 45, z: 17.5 } },
+    points: { leftHand: { x: -12, y: 55 }, rightHand: { x: 12, y: 55 },
+      leftFoot: { x: -12, y: 25 }, rightFoot: { x: 12, y: 25 } },
+    depth: { leftHand: 1, rightHand: 1, leftFoot: 1, rightFoot: 1 },
+  };
+  const balance = IK.supportForces(pose);
+  assert.ok(balance.forceResidual < 0.06);
+  assert.ok(balance.torqueResidual < 1);
+  assert.ok(balance.contacts.filter(c => c.limb.endsWith('Foot')).every(c => c.force.y > 0.06));
 });

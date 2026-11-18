@@ -167,6 +167,27 @@
     return mesh;
   }
 
+  function forceMesh(balance) {
+    const mesh = new Mesh();
+    if (!balance) return mesh;
+    function arrow(from, vector, color) {
+      const origin = [from.x, from.y, from.z];
+      const direction = [vector.x, vector.y, vector.z];
+      const length = Math.hypot(...direction) * 23;
+      if (length < 1) return;
+      const axis = unit(direction);
+      const base = add(origin, scale(axis, length - Math.min(3, length * .36)));
+      const tip = add(origin, scale(axis, length));
+      mesh.tube(origin, base, .34, .34, color);
+      mesh.tube(base, tip, 1.05, .01, color);
+    }
+    mesh.ellipsoid([balance.center.x, balance.center.y, balance.center.z],
+      [1.3, 1.3, 1.3], [1, .76, .26]);
+    arrow(balance.center, balance.gravity, [1, .76, .26]);
+    for (const { origin, force } of balance.contacts) arrow(origin, force, [.37, .95, 1]);
+    return mesh;
+  }
+
   function create(canvas, placements, geometry) {
     if (!geometry || geometry.layoutId !== 10) throw new Error('TB2 Mirror geometry is unavailable.');
     const gl = canvas.getContext('webgl', { alpha: false, antialias: true });
@@ -220,11 +241,11 @@
       attributes.forEach((attribute, i) => gl.vertexAttribPointer(attribute, 3, gl.FLOAT, false, 36, i * 12));
       gl.drawArrays(gl.TRIANGLES, 0, location.vertices);
     }
-    const boardBuffer = buffer(), routeBuffer = buffer(), climberBuffer = buffer();
+    const boardBuffer = buffer(), routeBuffer = buffer(), climberBuffer = buffer(), forceBuffer = buffer();
     upload(boardBuffer, boardMesh(placements, geometry), gl.STATIC_DRAW);
     const center = toWorld([0, 72, 0]);
-    let view, target, pose, route, activeId, pending = 0;
-    let routeDirty = true, poseDirty = true;
+    let view, target, pose, route, activeId, balance, pending = 0;
+    let routeDirty = true, poseDirty = true, forcesDirty = true;
     const pointers = new Map();
     function camera() {
       const e = Math.cos(view.pitch);
@@ -261,9 +282,20 @@
           upload(climberBuffer, climberMesh(pose), gl.DYNAMIC_DRAW);
           poseDirty = false;
         }
+        if (forcesDirty) {
+          upload(forceBuffer, forceMesh(balance), gl.DYNAMIC_DRAW);
+          forcesDirty = false;
+        }
         paint(boardBuffer);
         paint(routeBuffer);
         paint(climberBuffer);
+        // Vectors are annotations. Display reactions even where their line
+        // of action points through the wall face.
+        if (balance) {
+          gl.disable(gl.DEPTH_TEST);
+          paint(forceBuffer);
+          gl.enable(gl.DEPTH_TEST);
+        }
       });
     }
     function preset(name) {
@@ -328,13 +360,15 @@
     preset('reset');
     return {
       preset, zoom,
-      update(nextRoute, nextActive, nextPose) {
+      update(nextRoute, nextActive, nextPose, nextBalance) {
         const id = nextActive == null ? null : String(nextActive);
         if (route !== nextRoute || activeId !== id) routeDirty = true;
         if (pose !== nextPose) poseDirty = true;
+        if (balance !== nextBalance) forcesDirty = true;
         route = nextRoute;
         activeId = id;
         pose = nextPose;
+        balance = nextBalance;
         redraw();
       },
     };

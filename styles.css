@@ -305,3 +305,8 @@ h1 em { color: var(--lime); font-style: normal; }
 .board-3d-error { padding: 10px 12px; }
 .playback-controls .playback-position { flex: 1 0 100%; margin-left: 0; min-height: 30px; }
 .playback-position input { flex: 1; min-width: 0; accent-color: var(--lime); }
+.board-3d-force-toggle { display: inline-flex; gap: 5px; align-items: center; color: #e0ede1; font-size: 12px; }
+.board-3d-force-toggle input { accent-color: var(--lime); }
+#board-3d-force-legend span { margin-right: 7px; font-weight: 600; }
+#board-3d-force-legend span:first-child { color: #ffc242; }
+#board-3d-force-legend span:nth-child(2) { color: #61ebf8; }

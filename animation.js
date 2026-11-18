@@ -28,12 +28,35 @@
     };
     return footScore('leftFoot') < footScore('rightFoot') ? 'leftFoot' : 'rightFoot';
   }
-  function create(plan, placements) {
+  function create(plan, placements, { overhangDeg = 40 } = {}) {
     if (!plan?.ok || !plan.initialPose || !plan.initialContacts) throw new Error('A contact plan is required for playback.');
     const segments = [];
     // Only one virtual endpoint changes per frame. Keep the installed board
     // immutable and avoid copying all of its placements for every joint sample.
     const frameMap = new Map(placements instanceof Map ? placements : Object.entries(placements));
+    const wallAngle = overhangDeg * Math.PI / 180;
+    const gravityDown = Math.cos(wallAngle), gravityOut = Math.sin(wallAngle);
+    function hangingStance(body, stance) {
+      const left = IK.lookup(placements, stance.leftFoot), right = IK.lookup(placements, stance.rightFoot);
+      const leftHand = IK.lookup(placements, stance.leftHand), rightHand = IK.lookup(placements, stance.rightHand);
+      const footCenter = (left.x + right.x) / 2;
+      const spread = Math.max(12, Math.abs(right.x - left.x));
+      const stagger = (right.y - left.y) / spread;
+      const y = body.y - 6 * gravityDown;
+      const depth = 7 + 17 * gravityOut + ((left.z || 0) + (right.z || 0)) / 2;
+      const handHeight = (leftHand.y + rightHand.y) / 2;
+      const hangDepth = (handHeight - y - IK.DEFAULT_BODY.torsoLength * 0.45) * gravityOut / Math.max(0.25, gravityDown);
+      const restingDepth = depth + Math.max(-2, Math.min(6, 0.32 * (hangDepth - depth)));
+      return {
+        // In board coordinates gravity points down the wall and away from it.
+        // Let the pelvis follow that direction, with the chest nearer the holds.
+        y: Math.max(y, (4.5 + restingDepth * gravityOut) / Math.max(0.25, gravityDown)),
+        depth: restingDepth,
+        pitch: -0.45 * gravityOut,
+        hipYaw: signed(-0.19 * stagger - (body.x - footCenter) * 0.004, 0.24),
+        hipRoll: signed(0.35 * (body.hipTheta || 0) + 0.11 * stagger, 0.18),
+      };
+    }
     let contacts = { ...plan.initialContacts }, previous = plan.initialPose, total = 0;
     // Keep the anatomical bend branch for the whole playback. A branch change
     // would need an explicitly planned straight-limb transition.
@@ -47,11 +70,12 @@
       segment.supportFoot = supportFootFor(segment, placements);
       const stance = IK.lookup(placements, contacts[segment.supportFoot]);
       segment.weightShift = signed((stance.x - previous.torso.x) * 0.38, 5);
-      segment.supportSide = segment.supportFoot === 'leftFoot' ? -1 : 1;
       segment.isHand = step.limb.endsWith('Hand');
       segment.side = step.limb.startsWith('left') ? -1 : 1;
       segment.stride = Math.min(1, distance / 26);
       segment.highStep = segment.isHand ? 0 : clamp((to.y - from.y) / 20);
+      segment.before = hangingStance(segment.startTorso, contacts);
+      segment.after = hangingStance(segment.endTorso, step.contacts);
       segment.rockOver = segment.highStep * signed((to.x - step.pose.torso.x) * 0.28, 3.5);
       segment.release = segment.isHand ? 0.24 : 0.27 + segment.highStep * 0.05;
       segment.catch = segment.isHand ? 0.81 : 0.76;
@@ -72,6 +96,10 @@
           const pose = framePose(segment, i / 24, true);
           cost += pose.diagnostics.maxAngleViolationDeg ** 2 * 0.04 + pose.diagnostics.maxSegmentResidual ** 2 * 100
             + pose.diagnostics.torsoCorrection ** 2 * 0.24;
+          if (i % 6 === 0) {
+            const forces = IK.supportForces(pose, overhangDeg);
+            cost += 18 * forces.forceResidual ** 2 + 0.03 * forces.torqueResidual ** 2;
+          }
           peakResidual = Math.max(peakResidual, pose.diagnostics.maxSegmentResidual);
           if (prior) {
             cost += jointTravel(pose, prior, jointKey) ** 2 * 0.8;
@@ -116,23 +144,25 @@
       const airborne = t > segment.release && t < segment.catch;
       const clearance = Math.sin(Math.PI * reachT) ** 2;
       const torso = {};
-      for (const key of ['x', 'y', 'theta', 'hipTheta']) torso[key] = mix(segment.startTorso[key] || 0, segment.endTorso[key] || 0, bodyT);
+      for (const key of ['x', 'theta']) torso[key] = mix(segment.startTorso[key] || 0, segment.endTorso[key] || 0, bodyT);
+      torso.y = mix(segment.before.y, segment.after.y, bodyT);
+      // Pelvis angles come from the two foot placements, including when a
+      // hand moves. During a foot move turn into the new stance as it lands.
+      const stanceT = segment.isHand ? bodyT : ease((t - segment.release) / (1 - segment.release));
+      torso.hipTheta = mix(segment.before.hipRoll, segment.after.hipRoll, stanceT);
       const amount = segment.strength * segment.stride, side = segment.side;
       const rise = Math.tanh((segment.to.y - segment.from.y) / 12);
       torso.x += amount * segment.weightShift * (load + drive * 0.25);
       if (segment.isHand) {
-        // Compress over the supporting shoe, then extend it and lead the
-        // reach with the shoulder. The hips counter-rotate under the chest.
+        // Compress over the supporting shoe, then drive the reach from it.
         torso.y += amount * (-2.5 * load + 2 * drive * rise);
         torso.theta += amount * side * (0.06 * load + 0.17 * drive);
-        torso.hipTheta -= amount * side * (0.11 * load + 0.07 * drive);
       } else {
         // Keep weight on the standing leg while the lifted hip and knee
         // rise. Only rock toward the higher toe after it makes contact.
         const transfer = wave(t, segment.catch, 0.89, 1);
         torso.x += amount * segment.rockOver * transfer;
         torso.y += amount * (0.9 * load + (1.2 + segment.highStep) * drive);
-        torso.hipTheta += amount * side * (0.12 * load + 0.14 * drive);
         torso.theta -= amount * side * 0.10 * load;
       }
       torso.theta = signed(torso.theta, IK.DEFAULT_BODY.torsoAngleLimit);
@@ -148,17 +178,19 @@
       const motion = { movingLimb: segment.step.limb, supportFoot: segment.supportFoot, load, drive, airborne,
         grip: 1 - wave(t, segment.release - 0.07, segment.release + 0.12, segment.catch + 0.05),
         gazeTarget: segment.to, attention: wave(t, 0, segment.release, 1) };
+      const sag = segment.isHand ? 0 : 4 * amount * clearance;
+      torso.y -= gravityDown * sag;
+      const hipYaw = mix(segment.before.hipYaw, segment.after.hipYaw, stanceT);
       const space = {
-        // The pelvis draws closer over the loaded toe. The reaching shoulder
-        // opens independently as the supporting hip turns into the wall.
-        depth: 8 + amount * (-2.5 * load - 1.5 * drive * Math.max(0, rise)),
-        pitch: -0.06 - amount * 0.1 * drive,
-        hipYaw: -segment.supportSide * amount * (0.31 * load + 0.36 * drive),
-        chestYaw: amount * (segment.supportSide * 0.13 * load - (segment.isHand ? side : 0) * 0.42 * drive),
+        depth: mix(segment.before.depth, segment.after.depth, bodyT)
+          + gravityOut * sag - amount * (3.2 * load + 2.1 * drive * Math.max(0, rise)),
+        pitch: mix(segment.before.pitch, segment.after.pitch, bodyT) - amount * 0.07 * drive,
+        hipYaw,
+        chestYaw: hipYaw * 0.65 - (segment.isHand ? side : 0) * 0.19 * amount * drive,
         swingSide: segment.isHand ? 0 : side,
         swing: clearance * segment.stride,
       };
-      return IK.poseAt(torso, frameContacts, frameMap, { bendDirections: bends, motion, jointsOnly, space });
+      return IK.poseAt(torso, frameContacts, frameMap, { bendDirections: bends, motion, jointsOnly, space, overhangDeg });
     }
     function sample(elapsed = 0) {
       const time = Math.max(0, Math.min(total, elapsed));

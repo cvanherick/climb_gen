@@ -66,7 +66,12 @@
   function drawBoard(route = null, activeStep = -1, figure = null) {
     const step = route?.betaSteps?.[activeStep];
     if (!$('board-3d-canvas').hidden) {
-      spatialView.update(route, step?.id, figure);
+      const forces = figure && $('board-3d-forces').checked ? ClimbGenIK.supportForces(figure) : null;
+      spatialView.update(route, step?.id, figure, forces);
+      const legend = $('board-3d-force-legend');
+      legend.hidden = !forces;
+      if (forces) $('board-3d-force-solution').textContent = forces.forceResidual > 0.16 || forces.torqueResidual > 4
+        ? ' · Static balance incomplete' : '';
       return;
     }
     updateRouteRings(route, Boolean($('hold-vectors')?.checked));
@@ -104,6 +109,10 @@
     drawBoard(currentProblem, activeStep, currentPose);
   }
   $('board-3d-toggle').addEventListener('click', () => setBoardView($('board-3d-canvas').hidden));
+  $('board-3d-forces').addEventListener('change', () => {
+    const activeStep = currentPose && betaClock.elapsed < betaTimeline?.duration ? betaPlaybackIndex : -1;
+    drawBoard(currentProblem, activeStep, currentPose);
+  });
   $('board-3d-tools').addEventListener('click', event => {
     const action = event.target.closest('[data-camera]')?.dataset.camera;
     if (action === 'closer' || action === 'farther') spatialView.zoom(action === 'closer' ? 0.86 : 1.16);
