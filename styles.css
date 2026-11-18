@@ -57,6 +57,8 @@ body { min-height: 100vh; margin: 0; background: var(--bg); color: var(--text); 
 .name-control input:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
 .grade-control { min-width: 96px; display: grid; gap: 5px; color: #8b9992; font: 500 7px var(--mono); letter-spacing: .8px; }
 .grade-control select { height: 44px; padding: 0 27px 0 10px; border: 1px solid #3a494b; border-radius: 4px; background: #172326; color: var(--text); font: 600 11px var(--display); cursor: pointer; }
+.style-control { min-width: 96px; display: grid; gap: 5px; color: #8b9992; font: 500 7px var(--mono); letter-spacing: .8px; }
+.style-control select { height: 44px; padding: 0 24px 0 9px; border: 1px solid #3a494b; border-radius: 4px; background: #172326; color: var(--text); font: 600 10px var(--display); cursor: pointer; }
 .grade-control select:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
 .eyebrow { margin: 0; color: #8b9992; font: 500 8px var(--mono); letter-spacing: 1.45px; }
 .eyebrow span { margin-left: 5px; color: #5d6d66; }
@@ -218,11 +220,13 @@ h1 em { color: var(--lime); font-style: normal; }
   .home-choice { min-height: 145px; padding: 19px; }
   .home-choice strong { font-size: 19px; }
   .intro-row { align-items: center; gap: 12px; margin-bottom: 15px; }
-  .intro-controls { align-items: end; gap: 6px; }
+  .intro-controls { align-items: end; gap: 6px; flex-wrap: wrap; }
   .name-control { min-width: 105px; gap: 4px; font-size: 6px; letter-spacing: .45px; }
   .name-control input { height: 42px; min-width: 0; padding: 0 6px; font-size: 9px; }
   .grade-control { min-width: 66px; gap: 4px; font-size: 6px; letter-spacing: .45px; }
   .grade-control select { height: 42px; padding: 0 20px 0 6px; font-size: 9px; }
+  .style-control { min-width: 82px; gap: 4px; font-size: 6px; letter-spacing: .45px; }
+  .style-control select { height: 42px; padding: 0 16px 0 6px; font-size: 9px; }
   h1 { font-size: 28px; }
   .intro-copy { max-width: 245px; font-size: 10px; }
   .generate-button { width: auto; min-width: 145px; height: 42px; padding: 0 9px; border-radius: 4px; font-size: 10px; }
@@ -244,12 +248,14 @@ h1 em { color: var(--lime); font-style: normal; }
 }
 @media (max-width: 390px) {
   .intro-row { align-items: flex-start; }
-  .intro-controls { flex-direction: column; align-items: stretch; }
+  .intro-controls { display: grid; grid-template-columns: 1fr 1fr; align-items: end; }
   .name-control { display: flex; align-items: center; justify-content: space-between; }
   .name-control input { width: 130px; height: 30px; }
   .grade-control { display: flex; align-items: center; justify-content: space-between; }
   .grade-control select { height: 30px; }
-  .generate-button { min-width: 122px; height: 38px; }
+  .style-control { display: flex; align-items: center; justify-content: space-between; }
+  .style-control select { height: 30px; }
+  .generate-button { grid-column: 1 / -1; width: 100%; min-width: 122px; height: 38px; }
   h1 { font-size: 25px; }
   .board-tag { font-size: 6px; }
   .board-area { height: min(51vh, 420px); }
