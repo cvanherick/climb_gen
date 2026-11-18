@@ -50,7 +50,7 @@ The evaluation also records the previous approach's prewritten hand-move count a
 
 ### Limits and next research step
 
-This remains a 2D geometric animation. The support-polygon score does not estimate forces, friction, grip strength, wall collisions, or real-world fall risk. The search state stores torso pose, but equivalent contact/visited states are canonicalized during pruning to control runtime. Explicit foot flags, temporary unweighting, force transfer, and 3D cross-through motion are not modeled. Names remain titles and deterministic route-pool seeds, not learned text conditioning.
+The contact search uses the board plane. Playback solves a spatial rig and projects it onto the same hold map. It uses geometric constraints and an approximate center of mass. Grip, friction, and dynamic forces remain unmeasured. The search state stores torso pose, but equivalent contact/visited states are canonicalized during pruning to control runtime. Explicit foot flags, temporary unweighting, force transfer, and 3D cross-through motion are not modeled. Names remain titles and deterministic route-pool seeds, not learned text conditioning.
 
 ### Motion-data direction
 
@@ -66,7 +66,9 @@ Hand-direction costs depend on the shoulder position relative to the hold. Unkno
 
 Open **Hold direction references** under the board to inspect crops or show direction arrows. Import the supplied editor's exported JSON to apply reviewed directions; imports validate layout/IDs/numeric vectors, persist locally when storage permits, and invalidate cached beta for replanning. Screenshot-derived default estimates are never automatically marked reviewed.
 
-The pose solver has independently optimized chest and pelvis angles in the board plane. Both bend solutions are considered for elbows/knees, with previous-pose continuity and hand-direction preferences. Each hand includes a wrist/palm and five illustrative fingers with three segments each; each foot includes an ankle, heel and anchored toe. Upper/lower limb lengths and fixed contact endpoints are retained. Fingers depict a grip but do not solve contact against a 3D hold surface; torso rotation is in-plane and does not model 3D axial twisting. Playback uses a deterministic timeline with quintic easing, preparation/reach/settle phases, and limb arcs selected to reduce excessive folding. Render frames use the planned torso path with fixed bend branches; they do not restart torso optimization or snap back to stored planner poses. Joint-speed-based timing slows difficult contact changes. Pause/resume retains the exact playback time, and long background delays are bounded. Tests cover complete coordinate joins, direction signs/import validation, broad directional preference, wrist/shin lengths and planner contact anchors.
+Playback separates pelvis rotation, chest rotation and spine pitch. The supporting hip turns toward the wall before a reach. Elbows and knees bend in depth, and a high step brings the hips over the new toe after it is planted. The shoe rotates around a fixed contact point. The solver preserves arm and leg lengths in three dimensions and adjusts torso position when interpolated movement would overextend a limb. The board view projects those joints back onto the hold image.
+
+The timing and posture are procedural estimates. The weight shift and lower-body drive draw on [Asakawa and Sakamoto’s comparison of climber counter-movements](https://doi.org/10.1589/jpts.31.349). Playback tests check contact drift, limb and shoe lengths, and joint continuity on a bundled climb. Matching a particular climber’s movement would require calibrated motion footage and body measurements.
 
 ### Animation regression checks
 

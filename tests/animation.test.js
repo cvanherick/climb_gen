@@ -24,16 +24,28 @@ test('sampled playback retains planted anchors, stable bend directions and fixed
       if (limb === segment.step.limb) continue;
       const expected = placements.get(segment.contacts[limb]);
       assert.ok(Math.hypot(pose.points[limb].x - expected.x, pose.points[limb].y - expected.y) < 1e-9, `contact drift: ${limb}`);
+      assert.equal(pose.depth[limb], 0, `planted contact lifted: ${limb}`);
     }
     assert.deepEqual(pose.bendDirections, plan.initialPose.bendDirections);
     assert.ok(pose.diagnostics.maxSegmentResidual < 0.01);
+    const length = (a, b) => Math.hypot(pose.points[b].x - pose.points[a].x,
+      pose.points[b].y - pose.points[a].y, pose.depth[b] - pose.depth[a]);
+    for (const side of ['left', 'right']) {
+      assert.ok(Math.abs(length(side + 'Shoulder', side + 'Elbow') - IK.DEFAULT_BODY.upperArm) < 0.01);
+      assert.ok(Math.abs(length(side + 'Elbow', side + 'Wrist') - IK.DEFAULT_BODY.lowerArm) < 0.01);
+      assert.ok(Math.abs(length(side + 'Hip', side + 'Knee') - IK.DEFAULT_BODY.upperLeg) < 0.01);
+      assert.ok(Math.abs(length(side + 'Knee', side + 'Ankle') - IK.DEFAULT_BODY.lowerLeg) < 0.01);
+      assert.ok(Math.abs(length(side + 'Foot', side + 'Heel') - IK.DEFAULT_BODY.footLength) < 0.01);
+    }
+    assert.ok(Math.abs(length('leftShoulder', 'rightShoulder') - IK.DEFAULT_BODY.shoulderWidth) < 0.01);
     if (previous) for (const key of Object.keys(pose.points)) {
       const a = pose.points[key], b = previous.points[key];
-      maxJointStep = Math.max(maxJointStep, Math.hypot(a.x - b.x, a.y - b.y));
+      maxJointStep = Math.max(maxJointStep, Math.hypot(a.x - b.x, a.y - b.y,
+        (pose.depth[key] || 0) - (previous.depth[key] || 0)));
     }
     previous = pose;
   }
-  assert.ok(maxJointStep < 0.9, `joint jump at 60fps: ${maxJointStep}`);
+  assert.ok(maxJointStep < 1.55, `joint jump at 60fps: ${maxJointStep}`);
   for (const segment of timeline.segments.slice(1)) {
     const a = timeline.sample(segment.start - 0.01).pose;
     const b = timeline.sample(segment.start + 0.01).pose;
@@ -78,12 +90,17 @@ test('a hand reach loads a shoe before release, and a foot move clears the wall 
   const loaded = sample(reach, reach.release - 0.01), airborne = sample(reach, 0.5);
   assert.deepEqual(loaded.points.rightHand, wall.rh);
   assert.ok(loaded.torso.x > 1 && loaded.torso.y < stance.y);
+  assert.ok(loaded.depth.rightHip < loaded.depth.leftHip && loaded.depth.pelvis < sample(reach, 0).depth.pelvis);
   assert.ok(airborne.torso.theta > 0 && airborne.torso.hipTheta < 0);
   assert.ok(airborne.motion.airborne && airborne.motion.grip < 0.5);
+  assert.ok(airborne.depth.rightHand > 0);
   assert.deepEqual(airborne.diagnostics.supportHull, IK.convexHull([wall.lh, wall.lf, wall.rf]));
   const stepping = sample(step, (step.release + step.catch) / 2);
   assert.equal(stepping.motion.supportFoot, 'rightFoot');
   assert.deepEqual(stepping.points.rightFoot, wall.rf);
+  assert.equal(stepping.depth.rightFoot, 0);
+  assert.ok(stepping.depth.leftFoot > 1);
   assert.ok(stepping.points.leftFoot.y > (wall.lf.y + wall.nextFoot.y) / 2 + 1);
   assert.deepEqual(sample(step, 1).points.leftFoot, wall.nextFoot);
+  assert.equal(sample(step, 1).depth.leftFoot, 0);
 });

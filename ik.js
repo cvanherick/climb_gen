@@ -1,5 +1,4 @@
-/* Two-dimensional articulated climber model. This is a geometric approximation,
-   not a force, friction, collision, or real-world stability simulator. */
+/* Board-plane contact search and optional spatial pose solving for playback. */
 (function attach(root, factory) {
   const spectrum = root.ClimbGenHoldSpectrum || (typeof require === 'function' ? require('./hold_spectrum') : null);
   const api = factory(spectrum);
@@ -32,6 +31,17 @@
       ? [spec.side * body.shoulderWidth / 2, body.torsoLength]
       : [spec.side * body.hipWidth / 2, 0];
     const rotation = spec.kind === 'leg' ? (torso.hipTheta || 0) : torso.theta;
+    if (torso.space) {
+      const { depth, pitch, hipYaw, chestYaw } = torso.space;
+      const yaw = spec.kind === 'leg' ? hipYaw : chestYaw;
+      const width = offset[0] * Math.cos(yaw);
+      const height = offset[1] * Math.cos(pitch) - offset[0] * Math.sin(yaw) * Math.sin(pitch);
+      return {
+        x: torso.x + width * Math.cos(rotation) - height * Math.sin(rotation),
+        y: torso.y + width * Math.sin(rotation) + height * Math.cos(rotation),
+        z: depth + offset[1] * Math.sin(pitch) + offset[0] * Math.sin(yaw) * Math.cos(pitch),
+      };
+    }
     const c = Math.cos(rotation), s = Math.sin(rotation);
     return { x: torso.x + offset[0] * c - offset[1] * s, y: torso.y + offset[0] * s + offset[1] * c };
   }
@@ -43,7 +53,27 @@
   function limbTarget(limb, contact, torso, body) {
     if (LIMBS[limb].kind === 'arm') return contact;
     const sign = LIMBS[limb].side;
+    if (torso.space) return shoeAt(contact, torso, body, sign).ankle;
     return { x: contact.x - sign * Math.cos(torso.hipTheta || 0) * body.footLength * 0.6, y: contact.y + 1.5 };
+  }
+  const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y, (b.z || 0) - (a.z || 0));
+  function shoeAt(toe, torso, body, side) {
+    const { hipYaw, swingSide, swing } = torso.space;
+    // Pivot around the loaded toe. Roll onto the edge as the hip turns, and
+    // let the shoe clear the wall before the toe comes back down.
+    const roll = (torso.hipTheta || 0) + side * (0.18 + 0.35 * hipYaw);
+    const pitch = 0.44 + (side === swingSide ? 0.27 * swing : 0);
+    const cosRoll = Math.cos(roll), sinRoll = Math.sin(roll);
+    const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
+    const offset = (along, up, normal) => {
+      const x = -side * (along * cosPitch - normal * sinPitch);
+      return {
+        x: toe.x + x * cosRoll - up * sinRoll,
+        y: toe.y + x * sinRoll + up * cosRoll,
+        z: (toe.z || 0) + along * sinPitch + normal * cosPitch,
+      };
+    };
+    return { ankle: offset(body.footLength * 0.6, 1.5, 0.8), heel: offset(body.footLength, 0, 0) };
   }
   function jointAngleDeg(a, b, d) {
     const cosine = Math.max(-1, Math.min(1, (a * a + b * b - d * d) / (2 * a * b)));
@@ -52,13 +82,26 @@
   function segmentViolation(a, b, d) {
     return Math.max(0, Math.abs(a - b) + 1.5 - d, d - (a + b - 1.5));
   }
-  function twoBone(root, target, upper, lower, bendSide) {
-    const dx = target.x - root.x, dy = target.y - root.y;
-    const raw = Math.max(1e-5, Math.hypot(dx, dy));
+  function twoBone(root, target, upper, lower, bendSide, outward = 0) {
+    const dx = target.x - root.x, dy = target.y - root.y, dz = (target.z || 0) - (root.z || 0);
+    const raw = Math.max(1e-5, Math.hypot(dx, dy, dz));
     const d = Math.max(Math.abs(upper - lower) + 0.001, Math.min(upper + lower - 0.001, raw));
-    const ux = dx / raw, uy = dy / raw;
+    const ux = dx / raw, uy = dy / raw, uz = dz / raw;
     const along = (upper * upper + d * d - lower * lower) / (2 * d);
     const across = Math.sqrt(Math.max(0, upper * upper - along * along));
+    if (root.z != null) {
+      // The possible joint positions form a circle. Turn the bend plane
+      // out of the wall while retaining its left/right branch in projection.
+      const planar = Math.hypot(ux, uy);
+      const nx = planar > 0.00001 ? ux / planar : 1;
+      const ny = planar > 0.00001 ? uy / planar : 0;
+      const sideways = Math.cos(outward) * bendSide, away = Math.sin(outward);
+      return {
+        x: root.x + ux * along + across * (-ny * sideways - nx * uz * away),
+        y: root.y + uy * along + across * (nx * sideways - ny * uz * away),
+        z: root.z + uz * along + across * planar * away,
+      };
+    }
     return { x: root.x + ux * along - uy * across * bendSide, y: root.y + uy * along + ux * across * bendSide };
   }
   function pointSegmentDistance(p, a, b) {
@@ -125,7 +168,7 @@
       if (!target) return { cost: Infinity, maxReachViolation: Infinity, maxAngleViolation: Infinity };
       const root = rootFor(limb, torso, body), [a, b] = lengths(limb, body);
       const boneTarget = limbTarget(limb, target, torso, body);
-      const d = Math.hypot(boneTarget.x - root.x, boneTarget.y - root.y);
+      const d = distance(root, boneTarget);
       // Hand pull direction is from hold toward the shoulder. Foot force signs
       // cannot be inferred from these hand-grip screenshot annotations.
       if (LIMBS[limb].kind === 'arm') {
@@ -204,8 +247,12 @@
       if (contact && elbow) {
         const grip = motion?.movingLimb === side + 'Hand' ? motion.grip : 1;
         const axis = unit(elbow, contact), lateral = { x: -axis.y, y: axis.x };
-        const wrist = { x: contact.x - axis.x * body.palmLength, y: contact.y - axis.y * body.palmLength };
+        const handDepth = pose.depth?.[side + 'Hand'] || 0;
+        const elbowDepth = pose.depth?.[side + 'Elbow'] || 0;
+        const fraction = body.palmLength / Math.max(1e-6, distance({ ...elbow, z: elbowDepth }, { ...contact, z: handDepth }));
+        const wrist = { x: contact.x + (elbow.x - contact.x) * fraction, y: contact.y + (elbow.y - contact.y) * fraction };
         pose.points[side + 'Wrist'] = wrist;
+        if (pose.depth) pose.depth[side + 'Wrist'] = handDepth + (elbowDepth - handDepth) * fraction;
         const fingers = [];
         // Five three-segment digit chains curl toward the contact. Their
         // lengths and curl are illustrative; the contact anchor stays fixed.
@@ -226,12 +273,46 @@
       }
       if (toe && knee) {
         const angle = (pose.torso.hipTheta || 0) + sign * 0.22;
-        const heel = { x: toe.x - sign * Math.cos(angle) * body.footLength, y: toe.y - 0.2 };
-        const ankle = limbTarget(side + 'Foot', toe, pose.torso, body);
+        let heel = { x: toe.x - sign * Math.cos(angle) * body.footLength, y: toe.y - 0.2 };
+        let ankle;
+        if (pose.depth) {
+          const shoe = shoeAt({ ...toe, z: pose.depth[side + 'Foot'] }, pose.torso, body, sign);
+          pose.depth[side + 'Heel'] = shoe.heel.z;
+          pose.depth[side + 'Ankle'] = shoe.ankle.z;
+          heel = { x: shoe.heel.x, y: shoe.heel.y };
+          ankle = { x: shoe.ankle.x, y: shoe.ankle.y };
+        } else ankle = limbTarget(side + 'Foot', toe, pose.torso, body);
         pose.points[side + 'Ankle'] = ankle; pose.points[side + 'Heel'] = heel; pose.points[side + 'Toe'] = { ...toe };
         pose.feet[side] = { ankle, heel, toe, knee };
       }
     }
+  }
+  function constrainTorso(torso, geometry, body, space) {
+    const constrained = { ...torso, space };
+    // With orientation fixed, a limb's maximum reach is a disk in the
+    // board plane. Project the hips into the intersection of those disks
+    // to give an extended arm or leg room without dragging its contact.
+    const limits = geometry.targets.map(({ limb, target }) => {
+      const contact = { ...target, z: target.z || 0 };
+      const root = rootFor(limb, constrained, body);
+      const end = limbTarget(limb, contact, constrained, body);
+      const [upper, lower] = lengths(limb, body);
+      const radius = Math.sqrt(Math.max(0, (upper + lower - 0.8) ** 2 - (end.z - root.z) ** 2));
+      return { x: torso.x + end.x - root.x, y: torso.y + end.y - root.y, radius };
+    });
+    for (let iteration = 0; iteration < 12; iteration++) {
+      let correction = 0;
+      for (const { x, y, radius } of limits) {
+        const dx = constrained.x - x, dy = constrained.y - y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= radius) continue;
+        constrained.x = x + dx * radius / dist;
+        constrained.y = y + dy * radius / dist;
+        correction += dist - radius;
+      }
+      if (correction < 0.001) break;
+    }
+    return constrained;
   }
   function solve(contacts, placements, previous = null, options = {}) {
     const body = { ...DEFAULT_BODY, ...(options.body || {}) };
@@ -249,11 +330,36 @@
     }
     return poseAt(best.torso, contacts, placements, options);
   }
-  // Rendering a continuous trajectory must not restart the torso optimizer.
+  function spatialCenterOfMass(points, depth) {
+    const center = { x: 0, y: 0, z: 0 };
+    let total = 0;
+    const add = (a, b, mass) => {
+      if (!points[a] || !points[b]) return;
+      center.x += mass * (points[a].x + points[b].x) / 2;
+      center.y += mass * (points[a].y + points[b].y) / 2;
+      center.z += mass * (depth[a] + depth[b]) / 2;
+      total += mass;
+    };
+    // Approximate segment masses for a center-of-mass marker during playback.
+    add('pelvis', 'pelvis', 0.14);
+    add('pelvis', 'neck', 0.36);
+    add('head', 'head', 0.08);
+    for (const side of ['left', 'right']) {
+      add(side + 'Hip', side + 'Knee', 0.10);
+      add(side + 'Knee', side + 'Foot', 0.06);
+      add(side + 'Shoulder', side + 'Elbow', 0.03);
+      add(side + 'Elbow', side + 'Hand', 0.02);
+    }
+    return { x: center.x / total, y: center.y / total, z: center.z / total };
+  }
+  // Playback projects the requested pose onto the reach limits without
+  // rerunning the planner's search for a preferred stance.
   function poseAt(torso, contacts, placements, options = {}) {
     const body = { ...DEFAULT_BODY, ...(options.body || {}) };
     const motion = options.motion;
+    const requestedTorso = torso;
     const geometry = contactGeometry(contacts, placements, motion?.airborne ? motion.movingLimb : null);
+    if (options.space) torso = constrainTorso(torso, geometry, body, options.space);
     const diagnostics = scoreTorso(torso, geometry, null, body, options.overhangDeg ?? 40);
     const pose = {
       torso,
@@ -264,6 +370,7 @@
       },
       diagnostics: {
         maxReachViolation: diagnostics.maxReachViolation,
+        torsoCorrection: Math.hypot(torso.x - requestedTorso.x, torso.y - requestedTorso.y),
         maxAngleViolationDeg: diagnostics.maxAngleViolation,
         stabilityCost: diagnostics.supportCost,
         estimatedCost: diagnostics.cost,
@@ -278,29 +385,47 @@
         supportHull: diagnostics.hull,
       },
     };
+    if (torso.space) pose.depth = { pelvis: torso.space.depth };
+    const setPoint = (key, point) => {
+      pose.points[key] = { x: point.x, y: point.y };
+      if (pose.depth) pose.depth[key] = point.z || 0;
+    };
     // The shoulder line is represented by both arm roots. The torso line ends at
     // the midpoint between shoulders; lower/upper joints use exact link lengths.
     const leftShoulder = rootFor('leftHand', torso, body), rightShoulder = rootFor('rightHand', torso, body);
-    pose.points.leftShoulder = leftShoulder; pose.points.rightShoulder = rightShoulder;
+    setPoint('leftShoulder', leftShoulder);
+    setPoint('rightShoulder', rightShoulder);
     pose.points.neck = { x: (leftShoulder.x + rightShoulder.x) / 2, y: (leftShoulder.y + rightShoulder.y) / 2 };
     const gaze = motion?.gazeTarget;
     const headTilt = gaze ? Math.max(-0.32, Math.min(0.32,
       Math.atan2(gaze.x - pose.points.neck.x, Math.max(12, gaze.y - pose.points.neck.y)))) * motion.attention : 0;
+    const headOffset = body.headRadius * 1.65;
+    const headProjection = headOffset * Math.cos(torso.space?.pitch || 0);
     pose.points.head = {
-      x: pose.points.neck.x - Math.sin(torso.theta - headTilt) * body.headRadius * 1.65,
-      y: pose.points.neck.y + Math.cos(torso.theta - headTilt) * body.headRadius * 1.65,
+      x: pose.points.neck.x - Math.sin(torso.theta - headTilt) * headProjection,
+      y: pose.points.neck.y + Math.cos(torso.theta - headTilt) * headProjection,
     };
-    pose.points.leftHip = rootFor('leftFoot', torso, body); pose.points.rightHip = rootFor('rightFoot', torso, body);
+    if (pose.depth) {
+      pose.depth.neck = (leftShoulder.z + rightShoulder.z) / 2;
+      pose.depth.head = pose.depth.neck + headOffset * Math.sin(torso.space.pitch);
+    }
+    setPoint('leftHip', rootFor('leftFoot', torso, body));
+    setPoint('rightHip', rootFor('rightFoot', torso, body));
     let maxSegmentResidual = 0;
     for (const limb of Object.keys(LIMBS)) {
       const id = contacts[limb];
       if (id == null) { pose.points[limb] = rootFor(limb, torso, body); continue; }
-      const endpoint = lookup(placements, id), root = rootFor(limb, torso, body), [a, b] = lengths(limb, body);
+      const endpoint = lookup(placements, id);
+      const root = rootFor(limb, torso, body), [a, b] = lengths(limb, body);
       const boneEndpoint = limbTarget(limb, endpoint, torso, body);
       const bendSide = LIMBS[limb].kind === 'arm' ? -LIMBS[limb].side : LIMBS[limb].side;
       const jointKey = limb.replace('Hand', 'Elbow').replace('Foot', 'Knee');
       const previousJoint = options.previousPose?.points?.[jointKey];
-      const candidates = [twoBone(root, boneEndpoint, a, b, bendSide), twoBone(root, boneEndpoint, a, b, -bendSide)];
+      const { kind, side } = LIMBS[limb];
+      const outward = torso.space
+        ? kind === 'arm' ? 0.58 - side * torso.space.chestYaw * 0.22 : 0.91 - side * torso.space.hipYaw * 0.35
+        : 0;
+      const candidates = [twoBone(root, boneEndpoint, a, b, bendSide, outward), twoBone(root, boneEndpoint, a, b, -bendSide, outward)];
       const jointScore = (joint, index) => {
         const continuity = previousJoint ? Math.hypot(joint.x - previousJoint.x, joint.y - previousJoint.y) / (a + b) : 0;
         const direction = LIMBS[limb].kind === 'arm' ? directionPenalty(endpoint, joint).cost : 0;
@@ -312,19 +437,15 @@
       const joint = candidates[chosenIndex];
       pose.bendDirections ||= {};
       pose.bendDirections[limb] = chosenIndex === 0 ? bendSide : -bendSide;
-      const upperResidual = Math.abs(Math.hypot(joint.x - root.x, joint.y - root.y) - a);
-      const lowerResidual = Math.abs(Math.hypot(boneEndpoint.x - joint.x, boneEndpoint.y - joint.y) - b);
+      const upperResidual = Math.abs(distance(root, joint) - a);
+      const lowerResidual = Math.abs(distance(joint, boneEndpoint) - b);
       maxSegmentResidual = Math.max(maxSegmentResidual, upperResidual, lowerResidual);
-      if (limb.endsWith('Hand')) {
-        pose.points[limb] = { x: endpoint.x, y: endpoint.y };
-        pose.points[limb.replace('Hand', 'Elbow')] = joint;
-      } else {
-        pose.points[limb] = { x: endpoint.x, y: endpoint.y };
-        pose.points[limb.replace('Foot', 'Knee')] = joint;
-      }
+      setPoint(limb, endpoint);
+      setPoint(jointKey, joint);
     }
     pose.diagnostics.maxSegmentResidual = maxSegmentResidual;
     pose.diagnostics.kinematic = pose.diagnostics.kinematic && maxSegmentResidual < 0.1;
+    if (pose.depth) pose.diagnostics.centerOfMass = spatialCenterOfMass(pose.points, pose.depth);
     if (!options.jointsOnly) extremities(pose, body, motion);
     if (motion) pose.motion = motion;
     return pose;

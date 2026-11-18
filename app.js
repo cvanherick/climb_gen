@@ -181,8 +181,8 @@
     $('beta-note').textContent = problem.style === 'dynamic'
       ? 'Dyno-like routes keep at most three middle hand holds and two footholds, favoring longer reach-checked moves. The animation does not model jumping or momentum.'
       : problem.style === 'static'
-        ? 'Static style favors shorter, controlled reaches. Beta still uses 2D reach and support heuristics, not real-world physics.'
-        : 'Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.';
+        ? 'Static style favors shorter, controlled reaches.'
+        : 'Beta shows a suggested sequence for one modeled climber. Reach and grip vary by climber.';
     $('hold-count').textContent = problem.holds.length;
     $('move-count').textContent = '—';
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
