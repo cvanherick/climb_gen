@@ -91,8 +91,20 @@
       for (let i = 0; i < items.length; i++) { n -= weights[i]; if (n <= 0) return items[i]; }
       return items.at(-1);
     };
-    function generate({ grade = 'any', name = '', sequence = 0 } = {}) {
-      const seed = hash(`${salt}|${name}|${grade}|${sequence}`);
+    function styleFit(betaPlan, style) {
+      if (!style || style === 'any') return 0;
+      const handMoves = (betaPlan?.steps || []).filter((step) => step.role === roles.hand || step.role === roles.finish)
+        .map((step) => Number(step.movementDistance)).filter(Number.isFinite);
+      if (!handMoves.length) return 0;
+      const meanDistance = handMoves.reduce((sum, distance) => sum + distance, 0) / handMoves.length;
+      const longMoveShare = handMoves.filter((distance) => distance >= 22).length / handMoves.length;
+      const reach = Math.max(0, Math.min(1, meanDistance / 38));
+      return style === 'dynamic'
+        ? 0.55 * reach + 0.45 * longMoveShare
+        : 1 - (0.55 * reach + 0.45 * longMoveShare);
+    }
+    function generate({ grade = 'any', name = '', sequence = 0, style = 'any' } = {}) {
+      const seed = hash(`${salt}|${name}|${grade}|${style}|${sequence}`);
       const rng = randomFrom(seed);
       const chosenGrade = grade === 'any' ? grades[Math.floor(rng() * grades.length)] : grade;
       const templates = routesByGrade.get(chosenGrade) || [];
@@ -147,7 +159,7 @@
         if (seen.has(key) || rankedSignatures.has(key) || !assess(holds, placements).ok) continue;
         rankedSignatures.add(key);
         const evaluation = evaluator?.score(holds, placements, chosenGrade) || null;
-        ranked.push({ holds, grade: chosenGrade, source: { grade: chosenGrade, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true, evaluation });
+        ranked.push({ holds, grade: chosenGrade, source: { grade: chosenGrade, style, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true, evaluation });
         if (ranked.length >= rankAttempts) break;
       }
       if (ranked.length) {
@@ -160,12 +172,21 @@
     }
     async function generatePlayable(request, validate, config = {}) {
       const checks = config.maxChecks ?? 6;
+      const style = request.style || 'any';
+      let best = null, playableCount = 0;
       for (let attempt = 0; attempt < checks; attempt++) {
         const candidate = generate({ ...request, sequence: Number(request.sequence || 0) * checks + attempt });
         config.onProgress?.(attempt + 1, checks);
         const betaPlan = await validate(candidate, attempt);
-        if (betaPlan?.ok) return { ...candidate, betaPlan, checksPerformed: attempt + 1 };
+        if (betaPlan?.ok) {
+          const result = { ...candidate, betaPlan, checksPerformed: attempt + 1, styleFit: styleFit(betaPlan, style) };
+          if (style === 'any') return result;
+          playableCount++;
+          if (!best || result.styleFit > best.styleFit) best = result;
+          if (playableCount >= (config.styleCandidates ?? 3)) break;
+        }
       }
+      if (best) return best;
       throw new Error(`Could not find a beta-plannable variant after ${checks} quality-checked attempts. Generate again.`);
     }
     return { generate, generatePlayable, grades, countGenerated: () => seen.size, assess: (holds) => assess(holds, placements) };
