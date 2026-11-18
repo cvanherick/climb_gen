@@ -93,7 +93,7 @@
               : occupiedBy.every((other) => other.endsWith('Foot')));
             if (occupiedBy.length && !canMatch) continue;
             const contacts = { ...current.contacts, [limb]: id };
-            const pose = IK.solve(contacts, placements, current.pose.torso, { overhangDeg: options.overhangDeg ?? 40, iterations: 4 });
+            const pose = IK.solve(contacts, placements, current.pose.torso, { overhangDeg: options.overhangDeg ?? 40, iterations: 4, previousPose: current.pose });
             const diag = pose.diagnostics;
             if (!Number.isFinite(diag.estimatedCost)) continue;
             // Filter only grossly unreachable positions; softer elbow and
@@ -124,7 +124,7 @@
             const movementQualityPenalty = crossPenalty + highFootPenalty + lungeBias;
             const next = {
               contacts, initialContacts: current.initialContacts, visited, pose, depth: depth + 1,
-              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + repeatsLimb + movementQualityPenalty,
+              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + (diag.holdDirectionCost || 0) * 0.6 + repeatsLimb + movementQualityPenalty,
               path: [...current.path, { limb, label: labels[limb], movementType, movementDistance: movement, movementQualityPenalty, id: target.id, role: target.role, contacts, pose, diagnostics: diag }],
             };
             const key = keyOf(next), previousCost = seen.get(key);
@@ -143,7 +143,7 @@
   }
   function result(state, initialPose, expanded, ok, searchStats) {
     return { ok, steps: state.path, initialContacts: state.initialContacts, initialPose, finalContacts: state.contacts, finalPose: state.pose, expanded, ...searchStats, cost: state.g,
-      diagnostics: { maxReachViolation: Math.max(0, ...state.path.map((s) => s.diagnostics.maxReachViolation)), maxAngleViolationDeg: Math.max(0, ...state.path.map((s) => s.diagnostics.maxAngleViolationDeg)), maxSegmentResidual: Math.max(0, ...state.path.map((s) => s.diagnostics.maxSegmentResidual || 0)), maxEstimatedStabilityCost: Math.max(0, ...state.path.map((s) => s.diagnostics.stabilityCost)) } };
+      diagnostics: { maxReachViolation: Math.max(0, ...state.path.map((s) => s.diagnostics.maxReachViolation)), maxAngleViolationDeg: Math.max(0, ...state.path.map((s) => s.diagnostics.maxAngleViolationDeg)), maxSegmentResidual: Math.max(0, ...state.path.map((s) => s.diagnostics.maxSegmentResidual || 0)), maxHoldDirectionCost: Math.max(0, ...state.path.map((s) => s.diagnostics.holdDirectionCost || 0)), maxEstimatedStabilityCost: Math.max(0, ...state.path.map((s) => s.diagnostics.stabilityCost)) } };
   }
   function plan(problem, placements, options = {}) {
     const iterator = search(problem, placements, options);

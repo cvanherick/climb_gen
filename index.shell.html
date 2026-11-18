@@ -46,6 +46,16 @@
               <div id="board-hint" class="board-hint"><span>✳</span> Generate a problem to light the holds</div>
               <div class="board-angle">40° <i>FIXED ANGLE</i></div>
             </div>
+            <details class="hold-inspector">
+              <summary>Hold direction references</summary>
+              <p>Screenshot directions are estimates. <a href="./docs/hold-references/tb2_interactive_hold_force_editor.html" target="_blank" rel="noopener">Open direction editor</a>, then import reviewed JSON to refine beta poses.</p>
+              <label><input id="hold-vectors" type="checkbox" /> Show route pull directions</label>
+              <label>Inspect hold <select id="hold-profile-select"></select></label>
+              <div class="hold-profile-preview"><div id="hold-profile-crop" role="img" aria-label="Screenshot crop of selected hold"></div><p id="hold-profile-info"></p></div>
+              <label>Import reviewed directions <input id="hold-profile-import" type="file" accept=".json,application/json" /></label>
+              <button id="hold-profile-reset" type="button">Use original estimates</button>
+              <p id="hold-profile-status" role="status"></p>
+            </details>
             <div class="board-caption"><span><i class="legend-hold"></i> Actual TB2 hold set</span><span><i class="legend-route"></i> Generated problem</span><span>Layout data · 12 × 12</span></div>
           </div>
 

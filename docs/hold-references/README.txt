@@ -1,0 +1,1 @@
+498 per-position crops from the user-supplied TB2 Mirror screenshot. Force estimates are low-confidence shape heuristics. Holds may be partly cropped or show adjacent holds. Image IDs map to BoardLib-compatible Aurora position IDs 304-801. No online copyrighted image binaries are bundled.

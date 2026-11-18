@@ -261,3 +261,12 @@ h1 em { color: var(--lime); font-style: normal; }
   .board-area { height: min(51vh, 420px); }
   .board-caption { font-size: 5.8px; }
 }
+
+.hold-inspector { padding: 12px; color: #a7b5ae; border-top: 1px solid #344143; font-size: 11px; }
+.hold-inspector summary { cursor: pointer; }
+.hold-inspector label { display: block; margin: 10px 0; }
+.hold-inspector select, .hold-inspector button { background: #172326; color: #e6ede8; border: 1px solid #52615a; padding: 6px; }
+.hold-profile-preview { display: flex; align-items: center; gap: 12px; }
+#hold-profile-crop { flex: 0 0 64px; width: 64px; height: 64px; background-color: #fff; background-size: 1024px 2048px; border-radius: 4px; }
+
+.climber-digit { stroke: #e4fae9; stroke-width: 1.25; stroke-linecap: round; fill: none; }

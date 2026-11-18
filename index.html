@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=8eb967fec133" />
+    <link rel="stylesheet" href="./styles.css?v=e2311b7489bb" />
   </head>
   <body>
     <div class="app-shell">
@@ -33,6 +33,7 @@
           <div class="intro-controls">
             <label class="name-control" for="climb-name"><span>CLIMB NAME</span><input id="climb-name" type="text" maxlength="32" placeholder="e.g. Moonshot" autocomplete="off" aria-label="Climb name" /></label>
             <label class="grade-control" for="grade-select"><span>TARGET GRADE</span><select id="grade-select" aria-label="Target climbing grade"><option value="any">Any</option><option>V0</option><option>V1</option><option>V2</option><option>V3</option><option>V4</option><option selected>V5</option><option>V6</option><option>V7</option><option>V8</option><option>V9</option><option>V10</option><option>V11</option></select></label>
+            <label class="style-control" for="style-select"><span>CLIMB STYLE</span><select id="style-select" aria-label="Climb movement style"><option value="any" selected>Any style</option><option value="static">Static</option><option value="dynamic">Dyno-like</option></select></label>
             <button id="generate-button" class="generate-button" type="button"><span class="generate-icon">✳</span><span>Generate problem</span><span class="button-arrow">↗</span></button>
           </div>
         </section>
@@ -45,6 +46,16 @@
               <div id="board-hint" class="board-hint"><span>✳</span> Generate a problem to light the holds</div>
               <div class="board-angle">40° <i>FIXED ANGLE</i></div>
             </div>
+            <details class="hold-inspector">
+              <summary>Hold direction references</summary>
+              <p>Screenshot directions are estimates. <a href="./docs/hold-references/tb2_interactive_hold_force_editor.html" target="_blank" rel="noopener">Open direction editor</a>, then import reviewed JSON to refine beta poses.</p>
+              <label><input id="hold-vectors" type="checkbox" /> Show route pull directions</label>
+              <label>Inspect hold <select id="hold-profile-select"></select></label>
+              <div class="hold-profile-preview"><div id="hold-profile-crop" role="img" aria-label="Screenshot crop of selected hold"></div><p id="hold-profile-info"></p></div>
+              <label>Import reviewed directions <input id="hold-profile-import" type="file" accept=".json,application/json" /></label>
+              <button id="hold-profile-reset" type="button">Use original estimates</button>
+              <p id="hold-profile-status" role="status"></p>
+            </details>
             <div class="board-caption"><span><i class="legend-hold"></i> Actual TB2 hold set</span><span><i class="legend-route"></i> Generated problem</span><span>Layout data · 12 × 12</span></div>
           </div>
 
@@ -63,15 +74,15 @@
               <label>Speed <select id="playback-speed"><option value="1">1×</option><option value="0.7">0.7×</option><option value="1.4">1.4×</option></select></label>
             </div>
             <details id="planner-debug" class="planner-debug" hidden><summary>Planner diagnostics</summary><pre id="planner-diagnostics"></pre></details>
-            <div class="model-note"><span class="note-mark">⌁</span><p>Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.</p></div>
+            <div class="model-note"><span class="note-mark">⌁</span><p id="beta-note">Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.</p></div>
             <div class="result-footer"><i></i> COMMUNITY DATA · 40° <span>BoardLib</span></div>
           </aside>
         </section>
         </section>
       </main>
     </div>
-    <script src="./data/tb2-mirror-40.js?v=41d5d0502a0e"></script><script src="./data/tb2-route-evaluator.js?v=5d35e48fc2d8"></script>
-    <script src="./route_evaluator.js?v=2e343a7647b7"></script><script src="./route_generator.js?v=887bdf870529"></script><script src="./ik.js?v=fc65a012d9d7"></script><script src="./planner.js?v=184bcabca30b"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
-    <script src="./app.js?v=e4fabe956105"></script>
+    <script src="./data/tb2-hold-profiles.js?v=c16674ac3438"></script><script src="./data/tb2-mirror-40.js?v=41d5d0502a0e"></script><script src="./data/tb2-route-evaluator.js?v=5d35e48fc2d8"></script>
+    <script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=2e343a7647b7"></script><script src="./route_generator.js?v=da99a4b90c79"></script><script src="./ik.js?v=2fa7185834b4"></script><script src="./planner.js?v=494f358d8988"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
+    <script src="./app.js?v=ae6fa596f920"></script>
   </body>
 </html>

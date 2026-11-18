@@ -8,6 +8,7 @@
   };
   const board = { left: -68, right: 68, bottom: 0, top: 144, x: 20, y: 13.26, width: 560, height: 593.48 };
   const holdMap = new Map();
+  let holdProfileRevision = 0;
   let dataset, routeGenerator, generatedCount = 0, betaFrame = 0, betaPaused = false, betaPlaybackIndex = 0, betaResult = null, betaAlternatives = [], activeBetaIndex = 0, currentPose = null, generating = false, currentProblem = null;
 
   function point(x, y) {
@@ -37,6 +38,14 @@
         title.textContent = `${role} · ${position.label} · placement ${hold.id}`;
         ring.append(title);
         svg.append(ring);
+        const profile = position.profile;
+        if ($('hold-vectors')?.checked && profile && !profile.unknown) {
+          const end = point(position.x + profile.pull.x * 5, position.y + profile.pull.y * 5);
+          const dx = end.x - p.x, dy = end.y - p.y, angle = Math.atan2(dy, dx);
+          const arrow = svgEl('path', { d: `M ${p.x} ${p.y} L ${end.x} ${end.y} M ${end.x - 4 * Math.cos(angle - 0.6)} ${end.y - 4 * Math.sin(angle - 0.6)} L ${end.x} ${end.y} L ${end.x - 4 * Math.cos(angle + 0.6)} ${end.y - 4 * Math.sin(angle + 0.6)}`, fill: 'none', stroke: profile.verified ? '#a9e84a' : '#ffba68', 'stroke-width': 1.7, 'pointer-events': 'none' });
+          svg.append(arrow);
+        }
+        ring.addEventListener('click', () => { $('hold-profile-select').value = String(hold.id); $('hold-profile-select').dispatchEvent(new Event('change')); });
       });
       if (activeStep >= 0 && route.betaSteps?.[activeStep]) {
         const hold = holdMap.get(String(route.betaSteps[activeStep].id));
@@ -77,11 +86,26 @@
     };
     const p = frame.points;
     line(p.neck, p.pelvis, 'climber-body');
+    line(p.leftShoulder, p.rightShoulder, 'climber-body');
+    line(p.leftHip, p.rightHip, 'climber-body');
     for (const side of ['left', 'right']) {
       line(p[`${side}Shoulder`], p[`${side}Elbow`]);
-      line(p[`${side}Elbow`], p[`${side}Hand`]);
+      line(p[`${side}Elbow`], p[`${side}Wrist`] || p[`${side}Hand`]);
+      const hand = frame.hands?.[side];
+      if (hand) {
+        line(hand.wrist, hand.contact, 'climber-digit');
+        dot(hand.wrist, 2);
+        for (const finger of hand.fingers) for (let i = 1; i < finger.length; i++) line(finger[i - 1], finger[i], 'climber-digit');
+      }
       line(p[`${side}Hip`], p[`${side}Knee`]);
-      line(p[`${side}Knee`], p[`${side}Foot`]);
+      line(p[`${side}Knee`], p[`${side}Ankle`] || p[`${side}Foot`]);
+      const foot = frame.feet?.[side];
+      if (foot) {
+        line(foot.heel, foot.ankle, 'climber-digit');
+        line(foot.ankle, foot.toe, 'climber-digit');
+        line(foot.toe, foot.heel, 'climber-digit');
+        dot(foot.ankle, 2);
+      }
       dot(p[`${side}Elbow`], 3);
       dot(p[`${side}Knee`], 3);
     }
@@ -179,7 +203,9 @@
     button.disabled = true;
     button.textContent = 'Planning contacts…';
     $('beta-status').textContent = 'SEARCHING CONTACT STATES';
-    Promise.resolve(currentProblem.betaPlan || ClimbGenPlanner.planAsync(currentProblem, holdMap, { onProgress: (expanded) => { $('beta-status').textContent = `SEARCHING · ${expanded} STATES`; } })).then((result) => {
+    const revision = holdProfileRevision, problem = currentProblem;
+    Promise.resolve(currentProblem.betaPlan || ClimbGenPlanner.planAsync(currentProblem, holdMap, { style: currentProblem.style, onProgress: (expanded) => { $('beta-status').textContent = `SEARCHING · ${expanded} STATES`; } })).then((result) => {
+      if (revision !== holdProfileRevision || problem !== currentProblem) return;
       if (!result.ok) {
         button.disabled = false;
         button.textContent = 'Try beta search again';
@@ -199,7 +225,7 @@
         : currentProblem.style === 'static' ? ' · static, shorter controlled reaches' : '';
       $('route-copy').textContent = `${currentProblem.holds.length} holds · fresh ${currentProblem.source.grade} variant${styleReadout} · based on ${baseLabel}`;
       $('sequence-list').replaceChildren(...result.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
-      $('planner-diagnostics').textContent = JSON.stringify({ expandedStates: result.expanded, invalidTransitions: result.invalidTransitions, planningTimeMs: result.elapsedMs, weightedCost: Number(result.cost.toFixed(2)), movementTypes: [...new Set(result.steps.map((step) => step.movementType))], feasibility: { geometry: result.diagnostics.maxReachViolation < 0.25 ? 'modeled limb reach satisfied' : 'reach warning', kinematics: result.diagnostics.maxAngleViolationDeg < 1 && result.diagnostics.maxSegmentResidual < 0.1 ? 'modeled joint and segment limits satisfied' : 'pose warning', stability: 'heuristic estimate only', physical: 'unverified; no force, friction, grip, collision, or fall simulation' }, centerOfMassApproximation: result.initialPose.diagnostics.centerOfMass, supportPolygonApproximation: result.initialPose.diagnostics.supportHull, approximateStabilityCost: result.diagnostics.maxEstimatedStabilityCost, maxReachViolation: result.diagnostics.maxReachViolation, maxJointAngleLimitViolationDeg: result.diagnostics.maxAngleViolationDeg, maxTwoSegmentLengthResidual: result.diagnostics.maxSegmentResidual }, null, 2);
+      $('planner-diagnostics').textContent = JSON.stringify({ expandedStates: result.expanded, invalidTransitions: result.invalidTransitions, planningTimeMs: result.elapsedMs, weightedCost: Number(result.cost.toFixed(2)), holdDirectionCost: result.diagnostics.maxHoldDirectionCost, movementTypes: [...new Set(result.steps.map((step) => step.movementType))], feasibility: { geometry: result.diagnostics.maxReachViolation < 0.25 ? 'modeled limb reach satisfied' : 'reach warning', kinematics: result.diagnostics.maxAngleViolationDeg < 1 && result.diagnostics.maxSegmentResidual < 0.1 ? 'modeled joint and segment limits satisfied' : 'pose warning', stability: 'heuristic estimate only', physical: 'unverified; no force, friction, grip, collision, or fall simulation' }, centerOfMassApproximation: result.initialPose.diagnostics.centerOfMass, supportPolygonApproximation: result.initialPose.diagnostics.supportHull, approximateStabilityCost: result.diagnostics.maxEstimatedStabilityCost, maxReachViolation: result.diagnostics.maxReachViolation, maxJointAngleLimitViolationDeg: result.diagnostics.maxAngleViolationDeg, maxTwoSegmentLengthResidual: result.diagnostics.maxSegmentResidual }, null, 2);
       $('planner-debug').hidden = false;
       $('playback-controls').hidden = false;
       button.disabled = false;
@@ -228,13 +254,14 @@
       const step = betaResult.steps[stepIndex];
       if (started == null) started = now;
       const duration = 520 / Number($('playback-speed').value || 1);
-      const t = Math.min(1, (now - started) / duration);
+      const rawT = Math.min(1, (now - started) / duration);
+      const t = rawT * rawT * (3 - 2 * rawT);
       const from = posOf(current[step.limb]), target = posOf(step.id);
       const swingId = `swing:${stepIndex}`;
       const movingPlacements = new Map(holdMap);
       movingPlacements.set(swingId, { x: from.x + (target.x - from.x) * t, y: from.y + (target.y - from.y) * t });
       const frameContacts = { ...current, [step.limb]: swingId };
-      pose = ClimbGenIK.solve(frameContacts, movingPlacements, pose.torso, { overhangDeg: 40, iterations: 6 });
+      pose = ClimbGenIK.solve(frameContacts, movingPlacements, pose.torso, { overhangDeg: 40, iterations: 6, previousPose: pose });
       currentPose = pose;
       $('beta-status').textContent = `${step.movementType.toUpperCase()} · ${step.label.toUpperCase()} · ${stepIndex + 1}/${betaResult.steps.length}`;
       drawBoard(currentProblem, stepIndex, pose);
@@ -303,6 +330,79 @@
     $('beta-status').textContent = 'DATA ERROR';
     $('route-copy').textContent = 'The bundled TB2 data could not be loaded. Reload the page and try again.';
     $('generate-button').disabled = false;
+  }
+
+  function initHoldProfiles() {
+    const storageKey = 'climbgen-reviewed-hold-directions-v1';
+    let annotations = {};
+    let status = '';
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored) annotations = ClimbGenHoldProfiles.parseAnnotations(JSON.parse(stored));
+    } catch (_) { status = 'Saved directions were unavailable; using original estimates.'; }
+    ClimbGenHoldProfiles.apply(holdMap, window.CLIMBGEN_HOLD_PROFILES, annotations);
+    const select = $('hold-profile-select');
+    for (const hold of holdMap.values()) {
+      const option = document.createElement('option');
+      option.value = hold.id;
+      option.textContent = `#${hold.id} · ${hold.profile.material}`;
+      select.append(option);
+    }
+    const preview = () => {
+      const hold = holdMap.get(select.value), profile = hold.profile;
+      const crop = $('hold-profile-crop');
+      const atlas = window.CLIMBGEN_ASSETS?.holdAtlas || './assets/tb2-hold-crops-atlas.webp';
+      crop.style.backgroundImage = `url("${atlas}")`;
+      crop.style.backgroundPosition = `${-(profile.atlasIndex % 16) * 64}px ${-Math.floor(profile.atlasIndex / 16) * 64}px`;
+      crop.setAttribute('aria-label', `Screenshot crop of hold #${hold.id}`);
+      $('hold-profile-info').textContent = `${profile.material} · ${profile.unknown ? 'direction unresolved' : profile.verified ? 'reviewed direction' : 'low-confidence direction estimate'}. No measured grip strength.`;
+    };
+    const refresh = () => {
+      holdProfileRevision++;
+      cancelAnimationFrame(betaFrame);
+      betaResult = null; betaAlternatives = []; currentPose = null;
+      if (currentProblem) {
+        currentProblem.betaPlan = null;
+        currentProblem.betaSteps = null;
+        $('beta-button').disabled = false;
+        $('beta-button').textContent = 'Replan beta with updated directions';
+        $('beta-status').textContent = 'DIRECTIONS UPDATED · REPLAN BETA';
+        $('playback-controls').hidden = true;
+        $('planner-debug').hidden = true;
+        $('sequence-list').replaceChildren(sequenceItem(null, null, 'Reveal beta to update contacts', 'empty'));
+        $('move-count').textContent = '—';
+      }
+      preview(); drawBoard(currentProblem);
+    };
+    select.addEventListener('change', preview);
+    $('hold-vectors').addEventListener('change', () => drawBoard(currentProblem, -1, currentPose));
+    $('hold-profile-import').addEventListener('change', async (event) => {
+      if (generating) { $('hold-profile-status').textContent = 'Wait for generation to finish before importing directions.'; event.target.value = ''; return; }
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        if (file.size > 2000000) throw new Error('Direction JSON is too large.');
+        const document = JSON.parse(await file.text());
+        if (generating) throw new Error('Wait for generation to finish before importing directions.');
+        annotations = ClimbGenHoldProfiles.parseAnnotations(document);
+        ClimbGenHoldProfiles.apply(holdMap, window.CLIMBGEN_HOLD_PROFILES, annotations);
+        let saved = true;
+        try { localStorage.setItem(storageKey, JSON.stringify({ layout_id: 10, reviewed_annotations: annotations })); } catch (_) { saved = false; }
+        $('hold-profile-status').textContent = `Imported ${Object.keys(annotations).length} annotations${saved ? '.' : ' for this session; browser storage unavailable.'}`;
+        refresh();
+      } catch (error) { $('hold-profile-status').textContent = error.message; }
+      event.target.value = '';
+    });
+    $('hold-profile-reset').addEventListener('click', () => {
+      if (generating) return;
+      annotations = {};
+      try { localStorage.removeItem(storageKey); } catch (_) {}
+      ClimbGenHoldProfiles.apply(holdMap);
+      $('hold-profile-status').textContent = 'Using original screenshot estimates.';
+      refresh();
+    });
+    $('hold-profile-status').textContent = status || `498 mapped holds · ${Object.keys(annotations).length} annotations applied.`;
+    preview();
   }
 
   function initPhotoBuilder() {
@@ -629,6 +729,7 @@
     dataset = window.CLIMBGEN_DATA;
     if (!dataset?.placements?.length || !dataset?.routes?.length) throw new Error('Bundled TB2 data is missing');
     for (const hold of dataset.placements) holdMap.set(String(hold.id), hold);
+    initHoldProfiles();
     routeGenerator = ClimbGenRouteGenerator.create(dataset);
     $('route-copy').textContent = `${dataset.filtered_routes.toLocaleString()} real TB2 climbs`;
     $('route-grade').textContent = '40° · TB2 Mirror';
