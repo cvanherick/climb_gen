@@ -128,11 +128,11 @@
     const modelReadout = problem.evaluation
       ? ` · learned estimate ${problem.evaluation.predictedGrade} · community quality estimate ${problem.evaluation.quality.toFixed(1)}/5`
       : '';
-    const styleReadout = problem.style === 'dynamic' ? ' · dyno-like, longer reach bias'
+    const styleReadout = problem.style === 'dynamic' ? ' · dyno-like, sparse holds, longer reach bias'
       : problem.style === 'static' ? ' · static, shorter controlled reaches' : '';
     $('route-copy').textContent = `${problem.holds.length} holds · grade-conditioned ${problem.source.grade} variation${styleReadout}${modelReadout} · based on ${baseLabel}`;
     $('beta-note').textContent = problem.style === 'dynamic'
-      ? 'Dyno-like style favors longer, reach-checked hand moves. The animation does not model jumping, momentum, or flight.'
+      ? 'Dyno-like routes keep at most three middle hand holds and two footholds, favoring longer reach-checked moves. The animation does not model jumping or momentum.'
       : problem.style === 'static'
         ? 'Static style favors shorter, controlled reaches. Beta still uses 2D reach and support heuristics, not real-world physics.'
         : 'Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.';
@@ -195,7 +195,7 @@
       currentProblem.betaSteps = result.steps;
       $('move-count').textContent = result.steps.length;
       const baseLabel = currentProblem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${currentProblem.source.templateId}`;
-      const styleReadout = currentProblem.style === 'dynamic' ? ' · dyno-like, longer reach bias'
+      const styleReadout = currentProblem.style === 'dynamic' ? ' · dyno-like, sparse holds, longer reach bias'
         : currentProblem.style === 'static' ? ' · static, shorter controlled reaches' : '';
       $('route-copy').textContent = `${currentProblem.holds.length} holds · fresh ${currentProblem.source.grade} variant${styleReadout} · based on ${baseLabel}`;
       $('sequence-list').replaceChildren(...result.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
