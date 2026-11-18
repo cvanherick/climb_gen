@@ -93,15 +93,16 @@
   }
   async function sampleProblem() {
     const targetGrade = $('grade-select').value;
+    const climbStyle = $('style-select').value;
     const typedName = $('climb-name').value.trim();
     const climbName = typedName || `Climb ${String(generatedCount + 1).padStart(2, '0')}`;
     const candidate = await routeGenerator.generatePlayable(
-      { grade: targetGrade, name: climbName, sequence: generatedCount },
+      { grade: targetGrade, name: climbName, sequence: generatedCount, style: climbStyle },
       (variant, attempt) => ClimbGenPlanner.planAsync({ holds: routeHolds(variant) }, holdMap, {
-        maxExpanded: 500, beamWidth: 24, maxDepth: 24,
+        maxExpanded: 500, beamWidth: 24, maxDepth: 24, style: climbStyle,
         onProgress: (expanded) => { $('board-status').textContent = `CHECK ${attempt + 1} · ${expanded} STATES`; },
       }),
-      { maxChecks: 8, onProgress: (attempt, total) => {
+      { maxChecks: 8, styleCandidates: climbStyle === 'any' ? 1 : 3, onProgress: (attempt, total) => {
         $('board-status').textContent = `CHECKING ${attempt}/${total}`;
         $('generate-button').querySelector('span:nth-child(2)').textContent = `Checking variant ${attempt}/${total}…`;
       } },
@@ -111,6 +112,8 @@
       source: candidate.source,
       changed: candidate.changed,
       evaluation: candidate.evaluation,
+      style: climbStyle,
+      styleFit: candidate.styleFit,
       name: climbName,
       betaPlan: candidate.betaPlan,
     };
@@ -125,7 +128,14 @@
     const modelReadout = problem.evaluation
       ? ` · learned estimate ${problem.evaluation.predictedGrade} · community quality estimate ${problem.evaluation.quality.toFixed(1)}/5`
       : '';
-    $('route-copy').textContent = `${problem.holds.length} holds · grade-conditioned ${problem.source.grade} variation${modelReadout} · based on ${baseLabel}`;
+    const styleReadout = problem.style === 'dynamic' ? ' · dyno-like, longer reach bias'
+      : problem.style === 'static' ? ' · static, shorter controlled reaches' : '';
+    $('route-copy').textContent = `${problem.holds.length} holds · grade-conditioned ${problem.source.grade} variation${styleReadout}${modelReadout} · based on ${baseLabel}`;
+    $('beta-note').textContent = problem.style === 'dynamic'
+      ? 'Dyno-like style favors longer, reach-checked hand moves. The animation does not model jumping, momentum, or flight.'
+      : problem.style === 'static'
+        ? 'Static style favors shorter, controlled reaches. Beta still uses 2D reach and support heuristics, not real-world physics.'
+        : 'Beta uses 2D reach and support heuristics. Contact plans are not verified for force, grip, or real-world safety.';
     $('hold-count').textContent = problem.holds.length;
     $('move-count').textContent = '—';
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();
@@ -185,7 +195,9 @@
       currentProblem.betaSteps = result.steps;
       $('move-count').textContent = result.steps.length;
       const baseLabel = currentProblem.source.templateKind === 'ddpm' ? 'screened model sample' : `community climb #${currentProblem.source.templateId}`;
-      $('route-copy').textContent = `${currentProblem.holds.length} holds · fresh variant based on ${baseLabel} · ${currentProblem.source.grade}`;
+      const styleReadout = currentProblem.style === 'dynamic' ? ' · dyno-like, longer reach bias'
+        : currentProblem.style === 'static' ? ' · static, shorter controlled reaches' : '';
+      $('route-copy').textContent = `${currentProblem.holds.length} holds · fresh ${currentProblem.source.grade} variant${styleReadout} · based on ${baseLabel}`;
       $('sequence-list').replaceChildren(...result.steps.map((step, i) => sequenceItem(i + 1, step.id, step.label, step.role === 7 ? 'finish' : step.role === 8 ? 'foot' : 'hand')));
       $('planner-diagnostics').textContent = JSON.stringify({ expandedStates: result.expanded, invalidTransitions: result.invalidTransitions, planningTimeMs: result.elapsedMs, weightedCost: Number(result.cost.toFixed(2)), movementTypes: [...new Set(result.steps.map((step) => step.movementType))], feasibility: { geometry: result.diagnostics.maxReachViolation < 0.25 ? 'modeled limb reach satisfied' : 'reach warning', kinematics: result.diagnostics.maxAngleViolationDeg < 1 && result.diagnostics.maxSegmentResidual < 0.1 ? 'modeled joint and segment limits satisfied' : 'pose warning', stability: 'heuristic estimate only', physical: 'unverified; no force, friction, grip, collision, or fall simulation' }, centerOfMassApproximation: result.initialPose.diagnostics.centerOfMass, supportPolygonApproximation: result.initialPose.diagnostics.supportHull, approximateStabilityCost: result.diagnostics.maxEstimatedStabilityCost, maxReachViolation: result.diagnostics.maxReachViolation, maxJointAngleLimitViolationDeg: result.diagnostics.maxAngleViolationDeg, maxTwoSegmentLengthResidual: result.diagnostics.maxSegmentResidual }, null, 2);
       $('planner-debug').hidden = false;
