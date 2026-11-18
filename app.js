@@ -85,7 +85,9 @@
       svg.append(svgEl('circle', { cx: pp.x, cy: pp.y, r, class: className }));
     };
     const p = frame.points;
-    line(p.neck, p.pelvis, 'climber-body');
+    const outline = [p.leftShoulder, p.rightShoulder, p.rightHip, p.leftHip].map(q => { const v = point(q.x, q.y); return `${v.x},${v.y}`; }).join(' ');
+    svg.append(svgEl('polygon', { points: outline, class: 'climber-torso' }));
+    line(p.neck, p.head, 'climber-neck');
     line(p.leftShoulder, p.rightShoulder, 'climber-body');
     line(p.leftHip, p.rightHip, 'climber-body');
     for (const side of ['left', 'right']) {
@@ -97,8 +99,8 @@
         dot(hand.wrist, 2);
         for (const finger of hand.fingers) for (let i = 1; i < finger.length; i++) line(finger[i - 1], finger[i], 'climber-digit');
       }
-      line(p[`${side}Hip`], p[`${side}Knee`]);
-      line(p[`${side}Knee`], p[`${side}Ankle`] || p[`${side}Foot`]);
+      line(p[`${side}Hip`], p[`${side}Knee`], 'climber-leg');
+      line(p[`${side}Knee`], p[`${side}Ankle`] || p[`${side}Foot`], 'climber-leg');
       const foot = frame.feet?.[side];
       if (foot) {
         line(foot.heel, foot.ankle, 'climber-digit');
@@ -110,7 +112,7 @@
       dot(p[`${side}Knee`], 3);
     }
     dot(p.pelvis, 4);
-    dot(p.head, 4.5, 'climber-head');
+    dot(p.head, 12, 'climber-head');
   }
   function routeHolds(record) {
     return record.holds.map(([id, role]) => ({ id, role }));
@@ -233,53 +235,48 @@
       playBeta(0);
     });
   }
-  function playBeta(startIndex = 0) {
+  let betaTimeline = null;
+  const betaClock = ClimbGenAnimation.clock();
+  function playBeta(startIndex = 0, resume = false) {
     if (!betaResult?.ok) return;
     cancelAnimationFrame(betaFrame);
+    if (!resume || !betaTimeline) {
+      betaTimeline = ClimbGenAnimation.create(betaResult, holdMap);
+      betaClock.reset(betaTimeline.segments[startIndex]?.start || 0);
+    }
     betaPaused = false;
     $('playback-toggle').textContent = 'Pause';
-    let stepIndex = startIndex, started = null;
-    betaPlaybackIndex = startIndex;
-    let current = { ...betaResult.initialContacts };
-    let pose = betaResult.initialPose;
-    for (let i = 0; i < startIndex; i++) { current = { ...betaResult.steps[i].contacts }; pose = betaResult.steps[i].pose; }
     const tick = (now) => {
       if (betaPaused) return;
-      if (stepIndex >= betaResult.steps.length) {
-        betaPlaybackIndex = stepIndex;
-        drawBoard(currentProblem, -1, pose);
-        $('beta-status').textContent = betaResult.diagnostics.maxReachViolation < 0.25 && betaResult.diagnostics.maxAngleViolationDeg < 1 ? 'MODELED KINEMATIC LIMITS · PHYSICS UNVERIFIED' : 'POSE WARNINGS · PHYSICS UNVERIFIED';
+      const elapsed = betaClock.tick(now, Number($('playback-speed').value || 1));
+      const frame = betaTimeline.sample(elapsed);
+      currentPose = frame.pose;
+      betaPlaybackIndex = frame.stepIndex;
+      drawBoard(currentProblem, frame.done ? -1 : frame.stepIndex, frame.pose);
+      if (frame.done) {
+        betaPaused = true;
+        betaClock.pause();
+        $('playback-toggle').textContent = 'Replay';
+        $('beta-status').textContent = 'BETA COMPLETE · GEOMETRIC ANIMATION';
         return;
       }
-      const step = betaResult.steps[stepIndex];
-      if (started == null) started = now;
-      const duration = 520 / Number($('playback-speed').value || 1);
-      const rawT = Math.min(1, (now - started) / duration);
-      const t = rawT * rawT * (3 - 2 * rawT);
-      const from = posOf(current[step.limb]), target = posOf(step.id);
-      const swingId = `swing:${stepIndex}`;
-      const movingPlacements = new Map(holdMap);
-      movingPlacements.set(swingId, { x: from.x + (target.x - from.x) * t, y: from.y + (target.y - from.y) * t });
-      const frameContacts = { ...current, [step.limb]: swingId };
-      pose = ClimbGenIK.solve(frameContacts, movingPlacements, pose.torso, { overhangDeg: 40, iterations: 6, previousPose: pose });
-      currentPose = pose;
-      $('beta-status').textContent = `${step.movementType.toUpperCase()} · ${step.label.toUpperCase()} · ${stepIndex + 1}/${betaResult.steps.length}`;
-      drawBoard(currentProblem, stepIndex, pose);
-      if (t >= 1) {
-        current = { ...step.contacts };
-        pose = step.pose;
-        stepIndex++;
-        betaPlaybackIndex = stepIndex;
-        started = null;
-      }
+      const step = betaResult.steps[frame.stepIndex];
+      $('beta-status').textContent = `${frame.phase.toUpperCase()} · ${step.label.toUpperCase()} · ${frame.stepIndex + 1}/${betaResult.steps.length}`;
       betaFrame = requestAnimationFrame(tick);
     };
     betaFrame = requestAnimationFrame(tick);
   }
   $('playback-toggle').addEventListener('click', () => {
-    betaPaused = !betaPaused;
-    $('playback-toggle').textContent = betaPaused ? 'Play' : 'Pause';
-    if (!betaPaused) playBeta(betaPlaybackIndex);
+    if (!betaResult?.ok) return;
+    if (betaPaused) {
+      if (betaClock.elapsed >= betaTimeline?.duration) playBeta(0);
+      else playBeta(0, true);
+    } else {
+      betaPaused = true;
+      betaClock.pause();
+      cancelAnimationFrame(betaFrame);
+      $('playback-toggle').textContent = 'Play';
+    }
   });
   $('playback-replay').addEventListener('click', () => playBeta(0));
   $('playback-alternative').addEventListener('click', () => {

@@ -232,8 +232,12 @@
       const result = optimizeSeed(seed, contacts, placements, previous, body, overhangDeg, iterations);
       if (!best || result.score.cost < best.score.cost) best = result;
     }
-    const torso = best.torso;
-    const diagnostics = best.score;
+    return poseAt(best.torso, contacts, placements, options);
+  }
+  // Rendering a continuous trajectory must not restart the torso optimizer.
+  function poseAt(torso, contacts, placements, options = {}) {
+    const body = { ...DEFAULT_BODY, ...(options.body || {}) };
+    const diagnostics = scoreTorso(torso, contacts, placements, null, body, options.overhangDeg ?? 40);
     const pose = {
       torso,
       points: {
@@ -271,7 +275,7 @@
       if (id == null) { pose.points[limb] = rootFor(limb, torso, body); continue; }
       const endpoint = lookup(placements, id), root = rootFor(limb, torso, body), [a, b] = lengths(limb, body);
       const boneEndpoint = limbTarget(limb, endpoint, torso, body);
-      const bendSide = LIMBS[limb].side;
+      const bendSide = LIMBS[limb].kind === 'arm' ? -LIMBS[limb].side : LIMBS[limb].side;
       const jointKey = limb.replace('Hand', 'Elbow').replace('Foot', 'Knee');
       const previousJoint = options.previousPose?.points?.[jointKey];
       const candidates = [twoBone(root, boneEndpoint, a, b, bendSide), twoBone(root, boneEndpoint, a, b, -bendSide)];
@@ -280,7 +284,12 @@
         const direction = LIMBS[limb].kind === 'arm' ? directionPenalty(endpoint, joint).cost : 0;
         return continuity * 2 + direction * 0.4 + (index ? 0.12 : 0);
       };
-      const joint = jointScore(candidates[0], 0) <= jointScore(candidates[1], 1) ? candidates[0] : candidates[1];
+      const locked = options.bendDirections?.[limb];
+      const chosenIndex = locked === bendSide ? 0 : locked === -bendSide ? 1
+        : jointScore(candidates[0], 0) <= jointScore(candidates[1], 1) ? 0 : 1;
+      const joint = candidates[chosenIndex];
+      pose.bendDirections ||= {};
+      pose.bendDirections[limb] = chosenIndex === 0 ? bendSide : -bendSide;
       const upperResidual = Math.abs(Math.hypot(joint.x - root.x, joint.y - root.y) - a);
       const lowerResidual = Math.abs(Math.hypot(boneEndpoint.x - joint.x, boneEndpoint.y - joint.y) - b);
       maxSegmentResidual = Math.max(maxSegmentResidual, upperResidual, lowerResidual);
@@ -306,5 +315,5 @@
     }
     return out;
   }
-  return { DEFAULT_BODY, LIMBS, solve, interpolate, lookup, segmentViolation, convexHull, outsideHullDistance, directionPenalty };
+  return { DEFAULT_BODY, LIMBS, solve, poseAt, interpolate, lookup, segmentViolation, convexHull, outsideHullDistance, directionPenalty };
 });

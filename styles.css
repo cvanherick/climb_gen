@@ -270,3 +270,12 @@ h1 em { color: var(--lime); font-style: normal; }
 #hold-profile-crop { flex: 0 0 64px; width: 64px; height: 64px; background-color: #fff; background-size: 1024px 2048px; border-radius: 4px; }
 
 .climber-digit { stroke: #e4fae9; stroke-width: 1.25; stroke-linecap: round; fill: none; }
+
+.climber-torso { fill: #387768; stroke: #b3e7d0; stroke-width: 1.4; stroke-linejoin: round; }
+.climber-limb { stroke-width: 6; stroke-linecap: round; }
+
+.climber-limb, .climber-neck { stroke: #d5b69b; stroke-width: 7; stroke-linecap: round; }
+.climber-leg { stroke: #293d50; stroke-width: 10; stroke-linecap: round; filter: drop-shadow(0 1px 1px #fff); }
+.climber-joint { fill: #d5b69b; stroke: #293d50; stroke-width: 1; }
+.climber-head { fill: #d5b69b; stroke: #293d50; stroke-width: 1.5; }
+.climber-digit { stroke: #9d765f; }

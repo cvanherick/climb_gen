@@ -18,6 +18,7 @@ route_evaluator_data_path = ROOT / "data/tb2-route-evaluator.js"
 profiles_path = ROOT / "data/tb2-hold-profiles.js"
 hold_profiles_path = ROOT / "hold_profiles.js"
 app_path = ROOT / "app.js"
+animation_path = ROOT / "animation.js"
 ik_path = ROOT / "ik.js"
 planner_path = ROOT / "planner.js"
 route_generator_path = ROOT / "route_generator.js"
@@ -37,6 +38,7 @@ replacements = {
         f'<script src="./route_evaluator.js?v={cache_version(route_evaluator_path)}"></script>'
         f'<script src="./route_generator.js?v={cache_version(route_generator_path)}"></script>'
         f'<script src="./ik.js?v={cache_version(ik_path)}"></script>'
+        f'<script src="./animation.js?v={cache_version(animation_path)}"></script>'
         f'<script src="./planner.js?v={cache_version(planner_path)}"></script>'
         f'<script src="./photo_suggestions.js?v={cache_version(photo_suggestions_path)}"></script>'
         f'<script src="./photo_hold_detector.js?v={cache_version(photo_hold_detector_path)}"></script>'
@@ -53,7 +55,7 @@ if DIST.exists():
     shutil.rmtree(DIST)
 (DIST / "data").mkdir(parents=True)
 (DIST / "assets").mkdir()
-for name in ("hold_profiles.js", "app.js", "route_evaluator.js", "route_generator.js", "ik.js", "planner.js", "photo_suggestions.js", "photo_hold_detector.js", "styles.css"):
+for name in ("animation.js", "hold_profiles.js", "app.js", "route_evaluator.js", "route_generator.js", "ik.js", "planner.js", "photo_suggestions.js", "photo_hold_detector.js", "styles.css"):
     shutil.copy2(ROOT / name, DIST / name)
 shutil.copy2(ROOT / "data/tb2-mirror-40.js", DIST / "data/tb2-mirror-40.js")
 shutil.copy2(route_evaluator_data_path, DIST / "data/tb2-route-evaluator.js")
