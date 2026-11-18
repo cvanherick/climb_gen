@@ -37,6 +37,44 @@
     if (!hasProgressingHandSequence(starts, hands, finishes[0], options.maxReach ?? 36)) return { ok: false, reason: 'no upward hand sequence' };
     return { ok: true, features: { finishProgress: finishY - startY, verticalSpan, lowMiddleCount, isolatedDistance } };
   }
+  function compactDynoHolds(holds, placements) {
+    const starts = holds.filter(([, role]) => role === roles.start);
+    const middleHands = holds.filter(([, role]) => role === roles.hand);
+    const finishes = holds.filter(([, role]) => role === roles.finish);
+    const feet = holds.filter(([, role]) => role === roles.foot);
+    if (middleHands.length <= 3 && feet.length <= 2) return holds;
+
+    const startPoints = starts.map(([id]) => placements.get(String(id))).filter(Boolean);
+    const startCenter = {
+      x: startPoints.reduce((sum, p) => sum + p.x, 0) / Math.max(1, startPoints.length),
+      y: startPoints.reduce((sum, p) => sum + p.y, 0) / Math.max(1, startPoints.length),
+    };
+    const compactFeet = feet.map((hold) => ({ hold, point: placements.get(String(hold[0])) }))
+      .filter((item) => item.point)
+      .sort((a, b) => Math.hypot(a.point.x - startCenter.x, a.point.y - startCenter.y) - Math.hypot(b.point.x - startCenter.x, b.point.y - startCenter.y))
+      .slice(0, 2).map((item) => item.hold);
+    const evaluateSubset = (subset) => {
+      const candidate = [...starts, ...subset, ...finishes, ...compactFeet];
+      if (!assess(candidate, placements).ok) return null;
+      const points = subset.map(([id]) => placements.get(String(id))).filter(Boolean);
+      let spread = 0;
+      for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+        spread += Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y);
+      }
+      return { candidate, spread };
+    };
+    let best = null;
+    const choose = (from, picked) => {
+      if (picked.length === 3) {
+        const evaluated = evaluateSubset(picked);
+        if (evaluated && (!best || evaluated.spread > best.spread)) best = evaluated;
+        return;
+      }
+      for (let i = from; i <= middleHands.length - (3 - picked.length); i++) choose(i + 1, [...picked, middleHands[i]]);
+    };
+    choose(0, []);
+    return best?.candidate || null;
+  }
   function hasProgressingHandSequence(starts, hands, finish, maxReach) {
     const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
     const initialStartY = starts.reduce((n, p) => n + p.y, 0) / starts.length;
@@ -155,11 +193,13 @@
           changed++;
         }
         if (!changed) continue;
-        const key = signature(holds);
-        if (seen.has(key) || rankedSignatures.has(key) || !assess(holds, placements).ok) continue;
+        const generatedHolds = style === 'dynamic' ? compactDynoHolds(holds, placements) : holds;
+        if (!generatedHolds) continue;
+        const key = signature(generatedHolds);
+        if (seen.has(key) || rankedSignatures.has(key) || !assess(generatedHolds, placements).ok) continue;
         rankedSignatures.add(key);
-        const evaluation = evaluator?.score(holds, placements, chosenGrade) || null;
-        ranked.push({ holds, grade: chosenGrade, source: { grade: chosenGrade, style, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true, evaluation });
+        const evaluation = evaluator?.score(generatedHolds, placements, chosenGrade) || null;
+        ranked.push({ holds: generatedHolds, grade: chosenGrade, source: { grade: chosenGrade, style, templateId: template.id, templateKind: template.templateKind || 'community', quality: Number(template.quality || 0), gradeConditioned: true }, changed, signature: key, generatedOnDemand: true, evaluation });
         if (ranked.length >= rankAttempts) break;
       }
       if (ranked.length) {
