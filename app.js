@@ -8,6 +8,8 @@
   };
   const board = { left: -68, right: 68, bottom: 0, top: 144, x: 20, y: 13.26, width: 560, height: 593.48 };
   const holdMap = new Map();
+  const holdGeometry = window.CLIMBGEN_HOLD_GEOMETRY;
+  let spatialView;
   let holdProfileRevision = 0;
   let dataset, routeGenerator, generatedCount = 0, betaFrame = 0, betaPaused = false, betaPlaybackIndex = 0, betaResult = null, betaAlternatives = [], activeBetaIndex = 0, currentPose = null, generating = false, currentProblem = null;
 
@@ -62,8 +64,12 @@
     }
   }
   function drawBoard(route = null, activeStep = -1, figure = null) {
-    updateRouteRings(route, Boolean($('hold-vectors')?.checked));
     const step = route?.betaSteps?.[activeStep];
+    if (!$('board-3d-canvas').hidden) {
+      spatialView.update(route, step?.id, figure);
+      return;
+    }
+    updateRouteRings(route, Boolean($('hold-vectors')?.checked));
     activeRing.style.display = step ? '' : 'none';
     if (step) {
       const target = holdMap.get(String(step.id)), p = point(target.x, target.y);
@@ -75,6 +81,40 @@
     overlay.replaceChildren();
     if (figure && !$('planner-debug').hidden && $('planner-debug').open) drawPlannerOverlay(figure);
   }
+  function setBoardView(spatial) {
+    const canvas = $('board-3d-canvas'), toggle = $('board-3d-toggle'), error = $('board-3d-error');
+    if (spatial && !spatialView) {
+      try {
+        spatialView = ClimbGenBoard3D.create(canvas, holdMap, holdGeometry);
+      } catch (problem) {
+        console.error(problem);
+        error.textContent = '3D is unavailable in this browser. You can view the problem on the 2D board.';
+        error.hidden = false;
+        return;
+      }
+    }
+    error.hidden = true;
+    canvas.hidden = !spatial;
+    svg.toggleAttribute('hidden', spatial);
+    canvas.parentElement.classList.toggle('is-3d', spatial);
+    $('board-3d-tools').hidden = !spatial;
+    toggle.setAttribute('aria-pressed', String(spatial));
+    toggle.textContent = spatial ? 'Back to 2D' : '3D view';
+    const activeStep = currentPose && betaClock.elapsed < betaTimeline?.duration ? betaPlaybackIndex : -1;
+    drawBoard(currentProblem, activeStep, currentPose);
+  }
+  $('board-3d-toggle').addEventListener('click', () => setBoardView($('board-3d-canvas').hidden));
+  $('board-3d-tools').addEventListener('click', event => {
+    const action = event.target.closest('[data-camera]')?.dataset.camera;
+    if (action === 'closer' || action === 'farther') spatialView.zoom(action === 'closer' ? 0.86 : 1.16);
+    else if (action) spatialView.preset(action);
+  });
+  $('board-3d-canvas').addEventListener('webglcontextlost', () => {
+    setBoardView(false);
+    $('board-3d-toggle').disabled = true;
+    $('board-3d-error').textContent = 'The 3D view closed. Reload the page to reopen it.';
+    $('board-3d-error').hidden = false;
+  });
   function drawPlannerOverlay(frame) {
     const diagnostics = frame.diagnostics;
     if (diagnostics?.supportHull?.length > 1) {
@@ -266,11 +306,39 @@
   let betaTimeline = null;
   const timelines = new WeakMap();
   const betaClock = ClimbGenAnimation.clock();
+  const playbackPosition = $('playback-position');
+  function showBetaFrame(elapsed, seeking = false) {
+    const frame = betaTimeline.sample(elapsed);
+    currentPose = frame.pose;
+    const list = $('sequence-list'), rows = list.children, row = rows[frame.stepIndex];
+    if (frame.done || betaPlaybackIndex !== frame.stepIndex) rows[betaPlaybackIndex]?.classList.remove('active');
+    if (!frame.done && row && !row.classList.contains('active')) {
+      row.classList.add('active');
+      const bounds = row.getBoundingClientRect(), viewport = list.getBoundingClientRect();
+      if (bounds.bottom > viewport.bottom) list.scrollTop += Math.ceil(bounds.bottom - viewport.bottom);
+      else if (bounds.top < viewport.top) list.scrollTop -= Math.ceil(viewport.top - bounds.top);
+    }
+    betaPlaybackIndex = frame.stepIndex;
+    drawBoard(currentProblem, frame.done ? -1 : frame.stepIndex, frame.pose);
+    if (!seeking) playbackPosition.value = Math.round(elapsed / (betaTimeline.duration || 1) * 1000);
+    if (frame.done) {
+      betaPaused = true;
+      betaClock.pause();
+      $('playback-toggle').textContent = 'Replay';
+      $('beta-status').textContent = 'Finish matched';
+      return;
+    }
+    const step = betaResult.steps[frame.stepIndex];
+    $('beta-status').textContent = `${frame.stepIndex + 1}/${betaResult.steps.length} · ${step.label} · ${frame.phase}`;
+  }
   function playBeta(startIndex = 0, resume = false) {
     if (!betaResult?.ok) return;
     cancelAnimationFrame(betaFrame);
     if (!resume || !betaTimeline) {
-      if (!timelines.has(betaResult)) timelines.set(betaResult, ClimbGenAnimation.create(betaResult, holdMap));
+      if (!timelines.has(betaResult)) {
+        const anchors = ClimbGenBoard3D.contactPlacements(holdMap, holdGeometry);
+        timelines.set(betaResult, ClimbGenAnimation.create(betaResult, anchors));
+      }
       betaTimeline = timelines.get(betaResult);
       betaClock.reset(betaTimeline.segments[startIndex]?.start || 0);
     }
@@ -280,30 +348,20 @@
     const tick = (now) => {
       if (betaPaused) return;
       const elapsed = betaClock.tick(now, Number($('playback-speed').value || 1));
-      const frame = betaTimeline.sample(elapsed);
-      currentPose = frame.pose;
-      const list = $('sequence-list'), rows = list.children, row = rows[frame.stepIndex];
-      if (frame.done || betaPlaybackIndex !== frame.stepIndex) rows[betaPlaybackIndex]?.classList.remove('active');
-      if (!frame.done && row && !row.classList.contains('active')) {
-        row.classList.add('active');
-        const bottom = row.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
-        if (bottom > 0) list.scrollTop += Math.ceil(bottom);
-      }
-      betaPlaybackIndex = frame.stepIndex;
-      drawBoard(currentProblem, frame.done ? -1 : frame.stepIndex, frame.pose);
-      if (frame.done) {
-        betaPaused = true;
-        betaClock.pause();
-        $('playback-toggle').textContent = 'Replay';
-        $('beta-status').textContent = 'Finish matched';
-        return;
-      }
-      const step = betaResult.steps[frame.stepIndex];
-      $('beta-status').textContent = `${frame.stepIndex + 1}/${betaResult.steps.length} · ${step.label} · ${frame.phase}`;
-      betaFrame = requestAnimationFrame(tick);
+      showBetaFrame(Math.min(elapsed, betaTimeline.duration));
+      if (!betaPaused) betaFrame = requestAnimationFrame(tick);
     };
     betaFrame = requestAnimationFrame(tick);
   }
+  playbackPosition.addEventListener('input', () => {
+    if (!betaTimeline || !betaResult) return;
+    cancelAnimationFrame(betaFrame);
+    betaPaused = true;
+    $('playback-toggle').textContent = 'Play';
+    const elapsed = Number(playbackPosition.value) / 1000 * betaTimeline.duration;
+    betaClock.reset(elapsed);
+    showBetaFrame(elapsed, true);
+  });
   $('playback-toggle').addEventListener('click', () => {
     if (!betaResult?.ok) return;
     if (betaPaused) {
@@ -778,6 +836,7 @@
     ClimbGenHoldSpectrum.apply(holdMap);
     initHoldProfiles();
     routeGenerator = ClimbGenRouteGenerator.create(dataset);
+    $('board-3d-toggle').disabled = !holdGeometry;
     $('route-copy').textContent = `${dataset.filtered_routes.toLocaleString()} real TB2 climbs`;
     $('route-grade').textContent = '40° · TB2 Mirror';
     $('data-count').textContent = dataset.filtered_routes.toLocaleString();

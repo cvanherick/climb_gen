@@ -40,12 +40,29 @@
 
         <section class="content-grid">
           <div class="board-card">
-            <div class="card-heading"><h2>12 × 12 Mirror</h2><span id="board-status" class="board-status" role="status">Ready</span></div>
+            <div class="card-heading">
+              <h2>12 × 12 Mirror</h2>
+              <span id="board-status" class="board-status" role="status">Ready</span>
+              <button id="board-3d-toggle" class="view-button" type="button" aria-pressed="false" aria-controls="board-3d-canvas" disabled>3D view</button>
+            </div>
             <div class="board-area">
               <svg id="board-svg" viewBox="0 0 600 620" role="img" aria-label="Authentic TB2 Mirror hold layout with generated route highlighted"></svg>
+              <canvas id="board-3d-canvas" tabindex="0" aria-label="Interactive 3D Tension Board" aria-describedby="board-3d-help" hidden></canvas>
               <div id="board-hint" class="board-hint"><span>✳</span> Generate a problem to light the holds</div>
               <div class="board-angle">40° <i>FIXED ANGLE</i></div>
             </div>
+            <div id="board-3d-tools" class="board-3d-tools" hidden>
+              <div class="board-3d-controls" role="group" aria-label="3D camera controls">
+                <button class="view-button" type="button" data-camera="front">Front</button>
+                <button class="view-button" type="button" data-camera="side">Side</button>
+                <button class="view-button" type="button" data-camera="reset">Reset</button>
+                <button class="view-button" type="button" data-camera="closer" aria-label="Zoom in">+</button>
+                <button class="view-button" type="button" data-camera="farther" aria-label="Zoom out">−</button>
+              </div>
+              <p id="board-3d-help">Drag or use arrow keys to orbit. Shift + drag to pan. Scroll or pinch to zoom.</p>
+              <p>Hold depths are estimated.</p>
+            </div>
+            <p id="board-3d-error" class="board-3d-error" role="status" hidden></p>
             <details class="hold-inspector">
               <summary>Hold direction references</summary>
               <p>Screenshot directions are estimates. <a href="./docs/hold-references/tb2_interactive_hold_force_editor.html" target="_blank" rel="noopener">Open direction editor</a>, then import reviewed JSON to refine beta poses.</p>
@@ -70,6 +87,7 @@
               <button id="playback-replay" type="button">Replay</button>
               <button id="playback-alternative" type="button" disabled>Alternative beta</button>
               <label>Speed <select id="playback-speed"><option value="1">1×</option><option value="0.7">0.7×</option><option value="1.4">1.4×</option></select></label>
+              <label class="playback-position">Position <input id="playback-position" type="range" min="0" max="1000" value="0" /></label>
             </div>
             <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">Reveal beta to see the moves.</li></ol>
             <details id="planner-debug" class="planner-debug" hidden><summary>Planner diagnostics</summary><pre id="planner-diagnostics"></pre></details>

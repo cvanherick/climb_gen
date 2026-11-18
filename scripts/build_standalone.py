@@ -10,9 +10,10 @@ route_evaluator_data = (ROOT / "data/tb2-route-evaluator.js").read_text()
 spectrum = (ROOT / "data/tb2-hold-spectrum.js").read_text()
 spectrum_api = (ROOT / "hold_spectrum.js").read_text()
 profiles = (ROOT / "data/tb2-hold-profiles.js").read_text()
+hold_geometry = (ROOT / "data/tb2-hold-geometry.js").read_text()
 hold_profiles = (ROOT / "hold_profiles.js").read_text()
 app = (ROOT / "app.js").read_text()
-models = "\n".join((ROOT / name).read_text() for name in ("ik.js", "animation.js", "planner.js"))
+models = "\n".join((ROOT / name).read_text() for name in ("ik.js", "animation.js", "board_3d.js", "planner.js"))
 route_generator = (ROOT / "route_generator.js").read_text()
 route_evaluator = (ROOT / "route_evaluator.js").read_text()
 photo_suggestions = (ROOT / "photo_suggestions.js").read_text()
@@ -25,7 +26,7 @@ image_data = {
 image_data["holdAtlas"] = "data:image/webp;base64," + base64.b64encode((ROOT / "assets/tb2-hold-crops-atlas.webp").read_bytes()).decode("ascii")
 replacements = {
     "<!-- INLINE_STYLES -->": f"<style>\n{styles}\n</style>",
-    "<!-- INLINE_DATA -->": f"<script>\n{dataset}\n{spectrum}\n{profiles}\n{route_evaluator_data}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
+    "<!-- INLINE_DATA -->": f"<script>\n{dataset}\n{spectrum}\n{profiles}\n{hold_geometry}\n{route_evaluator_data}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
     "<!-- INLINE_MODELS -->": f"<script>\n{spectrum_api}\n{hold_profiles}\n{route_evaluator}\n{route_generator}\n{models}\n{photo_suggestions}\n{photo_hold_detector}\n</script>",
     "<!-- INLINE_APP -->": f"<script>\n{app}\n</script>",
 }

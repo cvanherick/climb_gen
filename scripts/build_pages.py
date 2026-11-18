@@ -18,6 +18,8 @@ route_evaluator_data_path = ROOT / "data/tb2-route-evaluator.js"
 spectrum_path = ROOT / "data/tb2-hold-spectrum.js"
 spectrum_api_path = ROOT / "hold_spectrum.js"
 profiles_path = ROOT / "data/tb2-hold-profiles.js"
+hold_geometry_path = ROOT / "data/tb2-hold-geometry.js"
+board_3d_path = ROOT / "board_3d.js"
 hold_profiles_path = ROOT / "hold_profiles.js"
 app_path = ROOT / "app.js"
 animation_path = ROOT / "animation.js"
@@ -33,6 +35,7 @@ replacements = {
     "<!-- INLINE_DATA -->": (
         f'<script src="./data/tb2-hold-spectrum.js?v={cache_version(spectrum_path)}"></script>'
         f'<script src="./data/tb2-hold-profiles.js?v={cache_version(profiles_path)}"></script>'
+        f'<script src="./data/tb2-hold-geometry.js?v={cache_version(hold_geometry_path)}"></script>'
         f'<script src="./data/tb2-mirror-40.js?v={cache_version(data_path)}"></script>'
         f'<script src="./data/tb2-route-evaluator.js?v={cache_version(route_evaluator_data_path)}"></script>'
     ),
@@ -43,6 +46,7 @@ replacements = {
         f'<script src="./route_generator.js?v={cache_version(route_generator_path)}"></script>'
         f'<script src="./ik.js?v={cache_version(ik_path)}"></script>'
         f'<script src="./animation.js?v={cache_version(animation_path)}"></script>'
+        f'<script src="./board_3d.js?v={cache_version(board_3d_path)}"></script>'
         f'<script src="./planner.js?v={cache_version(planner_path)}"></script>'
         f'<script src="./photo_suggestions.js?v={cache_version(photo_suggestions_path)}"></script>'
         f'<script src="./photo_hold_detector.js?v={cache_version(photo_hold_detector_path)}"></script>'
@@ -74,3 +78,5 @@ shutil.copy2(ROOT / "assets/tb2-hold-crops-atlas.webp", DIST / "assets/tb2-hold-
 shutil.copytree(ROOT / "docs/hold-references", DIST / "docs/hold-references")
 
 shutil.copy2(spectrum_path, DIST / "data/tb2-hold-spectrum.js")
+shutil.copy2(hold_geometry_path, DIST / "data" / hold_geometry_path.name)
+shutil.copy2(board_3d_path, DIST / board_3d_path.name)

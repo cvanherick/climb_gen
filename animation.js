@@ -140,7 +140,8 @@
       const moving = airborne ? {
         x: mix(segment.from.x, segment.to.x, reachT) + segment.arc * clearance,
         y: mix(segment.from.y, segment.to.y, reachT) + (segment.isHand ? 0 : 3.2 * amount * clearance),
-        z: (segment.isHand ? 2.4 : 3.5 + 1.5 * segment.highStep) * segment.stride * clearance,
+        z: mix(segment.from.z || 0, segment.to.z || 0, reachT)
+          + (segment.isHand ? 2.4 : 3.5 + 1.5 * segment.highStep) * segment.stride * clearance,
       } : t <= segment.release ? segment.from : segment.to;
       frameMap.set('__moving_contact__', moving);
       const frameContacts = { ...segment.contacts, [segment.step.limb]: '__moving_contact__' };

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=425c58fcba58" />
+    <link rel="stylesheet" href="./styles.css?v=6df0a74eea0c" />
   </head>
   <body>
     <div class="app-shell">
@@ -40,12 +40,29 @@
 
         <section class="content-grid">
           <div class="board-card">
-            <div class="card-heading"><h2>12 × 12 Mirror</h2><span id="board-status" class="board-status" role="status">Ready</span></div>
+            <div class="card-heading">
+              <h2>12 × 12 Mirror</h2>
+              <span id="board-status" class="board-status" role="status">Ready</span>
+              <button id="board-3d-toggle" class="view-button" type="button" aria-pressed="false" aria-controls="board-3d-canvas" disabled>3D view</button>
+            </div>
             <div class="board-area">
               <svg id="board-svg" viewBox="0 0 600 620" role="img" aria-label="Authentic TB2 Mirror hold layout with generated route highlighted"></svg>
+              <canvas id="board-3d-canvas" tabindex="0" aria-label="Interactive 3D Tension Board" aria-describedby="board-3d-help" hidden></canvas>
               <div id="board-hint" class="board-hint"><span>✳</span> Generate a problem to light the holds</div>
               <div class="board-angle">40° <i>FIXED ANGLE</i></div>
             </div>
+            <div id="board-3d-tools" class="board-3d-tools" hidden>
+              <div class="board-3d-controls" role="group" aria-label="3D camera controls">
+                <button class="view-button" type="button" data-camera="front">Front</button>
+                <button class="view-button" type="button" data-camera="side">Side</button>
+                <button class="view-button" type="button" data-camera="reset">Reset</button>
+                <button class="view-button" type="button" data-camera="closer" aria-label="Zoom in">+</button>
+                <button class="view-button" type="button" data-camera="farther" aria-label="Zoom out">−</button>
+              </div>
+              <p id="board-3d-help">Drag or use arrow keys to orbit. Shift + drag to pan. Scroll or pinch to zoom.</p>
+              <p>Hold depths are estimated.</p>
+            </div>
+            <p id="board-3d-error" class="board-3d-error" role="status" hidden></p>
             <details class="hold-inspector">
               <summary>Hold direction references</summary>
               <p>Screenshot directions are estimates. <a href="./docs/hold-references/tb2_interactive_hold_force_editor.html" target="_blank" rel="noopener">Open direction editor</a>, then import reviewed JSON to refine beta poses.</p>
@@ -70,6 +87,7 @@
               <button id="playback-replay" type="button">Replay</button>
               <button id="playback-alternative" type="button" disabled>Alternative beta</button>
               <label>Speed <select id="playback-speed"><option value="1">1×</option><option value="0.7">0.7×</option><option value="1.4">1.4×</option></select></label>
+              <label class="playback-position">Position <input id="playback-position" type="range" min="0" max="1000" value="0" /></label>
             </div>
             <ol id="sequence-list" class="sequence-list"><li class="sequence-empty">Reveal beta to see the moves.</li></ol>
             <details id="planner-debug" class="planner-debug" hidden><summary>Planner diagnostics</summary><pre id="planner-diagnostics"></pre></details>
@@ -80,8 +98,8 @@
         </section>
       </main>
     </div>
-    <script src="./data/tb2-hold-spectrum.js?v=e9ac7adfa09b"></script><script src="./data/tb2-hold-profiles.js?v=c16674ac3438"></script><script src="./data/tb2-mirror-40.js?v=6a1446fbed0e"></script><script src="./data/tb2-route-evaluator.js?v=d754ea92a8ac"></script>
-    <script src="./hold_spectrum.js?v=59163f5eaf04"></script><script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=ef37ab0bd574"></script><script src="./route_generator.js?v=8a7d8f4a7a67"></script><script src="./ik.js?v=7d8ff43b3dee"></script><script src="./animation.js?v=a7d00115e06b"></script><script src="./planner.js?v=a5a1409e5e37"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
-    <script src="./app.js?v=c6f345a6711b"></script>
+    <script src="./data/tb2-hold-spectrum.js?v=e9ac7adfa09b"></script><script src="./data/tb2-hold-profiles.js?v=c16674ac3438"></script><script src="./data/tb2-hold-geometry.js?v=363739a5346e"></script><script src="./data/tb2-mirror-40.js?v=6a1446fbed0e"></script><script src="./data/tb2-route-evaluator.js?v=d754ea92a8ac"></script>
+    <script src="./hold_spectrum.js?v=59163f5eaf04"></script><script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=ef37ab0bd574"></script><script src="./route_generator.js?v=8a7d8f4a7a67"></script><script src="./ik.js?v=7d8ff43b3dee"></script><script src="./animation.js?v=b197ab802a31"></script><script src="./board_3d.js?v=36b44b8226a1"></script><script src="./planner.js?v=a5a1409e5e37"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
+    <script src="./app.js?v=16010df5059f"></script>
   </body>
 </html>

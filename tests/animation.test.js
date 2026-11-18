@@ -70,37 +70,40 @@ test('pause, speed changes and background delays preserve playback time', () => 
   assert.equal(clock.tick(20000), 255, 'background tabs must not jump ahead seconds');
 });
 
-test('a hand reach loads a shoe before release, and a foot move clears the wall in projection', () => {
+test('a hand reach loads a shoe before release, and a foot lifts between raised hold surfaces', () => {
   const wall = {
     lh: { x: -14, y: 75 }, rh: { x: 12, y: 74 }, lf: { x: -12, y: 10 },
     rf: { x: 13, y: 12 }, nextHand: { x: 21, y: 82 }, nextFoot: { x: -5, y: 23 },
   };
   const initial = { leftHand: 'lh', rightHand: 'rh', leftFoot: 'lf', rightFoot: 'rf' };
   const hand = { ...initial, rightHand: 'nextHand' }, foot = { ...hand, leftFoot: 'nextFoot' };
+  const depths = { lh: 1.2, rh: 1.8, lf: 0.8, rf: 0.9, nextHand: 2.4, nextFoot: 1.4 };
   // Identical endpoint torsos isolate the deliberate in-between movement.
   const stance = { x: 0, y: 38, theta: 0, hipTheta: 0 };
   const pose = contacts => IK.poseAt(stance, contacts, wall);
+  const raised = Object.fromEntries(Object.entries(wall).map(([key, p]) => [key, { ...p, z: depths[key] }]));
   const timeline = Animation.create({
     ok: true, initialPose: pose(initial), initialContacts: initial,
     steps: [{ limb: 'rightHand', id: 'nextHand', contacts: hand, pose: pose(hand) },
       { limb: 'leftFoot', id: 'nextFoot', contacts: foot, pose: pose(foot) }],
-  }, wall);
+  }, raised);
   const [reach, step] = timeline.segments;
   const sample = (segment, t) => timeline.sample(segment.start + t * segment.duration).pose;
   const loaded = sample(reach, reach.release - 0.01), airborne = sample(reach, 0.5);
   assert.deepEqual(loaded.points.rightHand, wall.rh);
+  assert.equal(loaded.depth.rightHand, depths.rh);
   assert.ok(loaded.torso.x > 1 && loaded.torso.y < stance.y);
   assert.ok(loaded.depth.rightHip < loaded.depth.leftHip && loaded.depth.pelvis < sample(reach, 0).depth.pelvis);
   assert.ok(airborne.torso.theta > 0 && airborne.torso.hipTheta < 0);
   assert.ok(airborne.motion.airborne && airborne.motion.grip < 0.5);
-  assert.ok(airborne.depth.rightHand > 0);
+  assert.ok(airborne.depth.rightHand > depths.nextHand);
   assert.deepEqual(airborne.diagnostics.supportHull, IK.convexHull([wall.lh, wall.lf, wall.rf]));
   const stepping = sample(step, (step.release + step.catch) / 2);
   assert.equal(stepping.motion.supportFoot, 'rightFoot');
   assert.deepEqual(stepping.points.rightFoot, wall.rf);
-  assert.equal(stepping.depth.rightFoot, 0);
-  assert.ok(stepping.depth.leftFoot > 1);
+  assert.equal(stepping.depth.rightFoot, depths.rf);
+  assert.ok(stepping.depth.leftFoot > depths.nextFoot);
   assert.ok(stepping.points.leftFoot.y > (wall.lf.y + wall.nextFoot.y) / 2 + 1);
   assert.deepEqual(sample(step, 1).points.leftFoot, wall.nextFoot);
-  assert.equal(sample(step, 1).depth.leftFoot, 0);
+  assert.equal(sample(step, 1).depth.leftFoot, depths.nextFoot);
 });

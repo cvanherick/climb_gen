@@ -12,6 +12,12 @@ Run `python3 scripts/build_standalone.py` to create self-contained `index.html`,
 
 The database and placement images were downloaded using BoardLib’s documented public data flow. BoardLib extracts the bundled database from the Tension Board Android app and downloads layout images from the Board API; syncing newer rows requires a Tension account, so this bundled slice reflects the app database version available at acquisition time. See [BoardLib](https://github.com/lemeryfertitta/BoardLib).
 
+## Interactive 3D board
+
+Choose **3D view** on the TB2 card, then reveal beta for a generated problem. Drag or use the arrow keys to orbit. Shift + drag pans, and scroll, pinch or the zoom buttons adjust distance. **Front**, **Side**, and **Reset** switch camera angles. The playback position slider pauses at the selected time, and the same playback position is used in both board views.
+
+The 12 × 12 ft panel is set at 40° from vertical. All 498 holds use the app's installed Mirror coordinates. The [Tension Climbing installation index and CAD archive](https://tensionclimbing.com/pages/led-installation-guides) publish installation locations and planar panel drawings. The archive contains four planar DXF files. The hold meshes use footprints from the aligned board images, including two footprints rotated from the matching hold shape using its installation marker. Their depths and relief are estimated. Playback anchors hands and toes to the modeled contact surfaces. Rebuild the footprints with `python3 scripts/build_hold_geometry.py` (OpenCV and NumPy).
+
 ## On-demand climb generation
 
 The browser now generates a new climb variant on every click rather than cycling through the 120-row prepared pool. `route_generator.js` selects a well-rated route template for the requested grade, keeps every start hold in the board's lower third (`y ≤ 44`), changes one to three hand or foot contacts using TB2 community hold frequencies, then checks upward progress, reachability, vertical spread, and isolated holds. Before displaying a route, the app also requires the four-limb beta planner to find a contact sequence; it retries other variants when a candidate fails. Quality-checked DDPM samples can also seed variants. It avoids repeats during the current page session. The possible combinations are very large but finite because the board has a fixed hold set.
