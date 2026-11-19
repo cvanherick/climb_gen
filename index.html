@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=85ea0ee488fe" />
+    <link rel="stylesheet" href="./styles.css?v=8aa2e5bdce75" />
   </head>
   <body>
     <div class="app-shell">
@@ -59,11 +59,16 @@
                 <button class="view-button" type="button" data-camera="reset">Reset</button>
                 <button class="view-button" type="button" data-camera="closer" aria-label="Zoom in">+</button>
                 <button class="view-button" type="button" data-camera="farther" aria-label="Zoom out">−</button>
+                <label class="board-3d-force-toggle"><input id="board-3d-forces" type="checkbox" /> Show hold loads</label>
               </div>
-              <p id="board-3d-help">Drag or use arrow keys to orbit. Shift + drag to pan. Scroll or pinch to zoom.</p>
-              <p>Hold depths are estimated.</p>
-              <label class="board-3d-force-toggle"><input id="board-3d-forces" type="checkbox" /> Show forces</label>
-              <p id="board-3d-force-legend" hidden><span>Gravity</span> <span>Hold reactions</span> · Estimated in body-weight units<b id="board-3d-force-solution"></b></p>
+              <p id="board-3d-help">Drag to orbit · Shift + drag to pan · Scroll or pinch to zoom</p>
+              <section id="board-3d-force-panel" class="hold-loads" aria-labelledby="hold-load-title" hidden>
+                <header><h3 id="hold-load-title">Hold loads</h3><span>% of body weight</span></header>
+                <p id="hold-load-status">Reveal beta to see load estimates.</p>
+                <dl id="hold-load-rows" class="hold-load-rows"></dl>
+                <p id="board-3d-force-legend" class="hold-load-key" hidden><span>Hand pull</span><span>Foot push</span><span>Gravity</span></p>
+                <details><summary>How estimates work</summary><p>Dots show estimated contact patches. Arrows at the holds show the climber’s pull or push. Load ranges compare plausible static balances at this pose. Hold depth, grip and motion are modeled.</p></details>
+              </section>
             </div>
             <p id="board-3d-error" class="board-3d-error" role="status" hidden></p>
             <details class="hold-inspector">
@@ -213,7 +218,7 @@
       </main>
     </div>
     <script src="./data/tb2-hold-spectrum.js?v=e9ac7adfa09b"></script><script src="./data/tb2-hold-profiles.js?v=c16674ac3438"></script><script src="./data/tb2-hold-geometry.js?v=363739a5346e"></script><script src="./data/tb2-mirror-40.js?v=6a1446fbed0e"></script><script src="./data/tb2-route-evaluator.js?v=d754ea92a8ac"></script>
-    <script src="./hold_spectrum.js?v=59163f5eaf04"></script><script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=ef37ab0bd574"></script><script src="./route_generator.js?v=8a7d8f4a7a67"></script><script src="./ik.js?v=8385777aba58"></script><script src="./animation.js?v=ee49b68b634b"></script><script src="./board_3d.js?v=84ee91fca255"></script><script src="./planner.js?v=0dcb372f21ae"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
+    <script src="./hold_spectrum.js?v=59163f5eaf04"></script><script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=ef37ab0bd574"></script><script src="./route_generator.js?v=8a7d8f4a7a67"></script><script src="./ik.js?v=2a8bd5675aba"></script><script src="./animation.js?v=64b0f795526b"></script><script src="./board_3d.js?v=42e2718aa1bd"></script><script src="./planner.js?v=2ef0c0344978"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
     <script src="./analysis/video_player.js?v=c27b3d8016c0"></script>
     <script src="./analysis/calibration.js?v=87257e00af90"></script>
     <script src="./analysis/analysis_model.js?v=0f1321f5d91d"></script>
@@ -222,6 +227,6 @@
     <script src="./analysis/feedback_engine.js?v=25bf80efe59a"></script>
     <script src="./analysis/pose_tracker.js?v=995862350e1c"></script>
     <script src="./analysis/analysis_ui.js?v=82ca38b1e45d"></script>
-    <script src="./app.js?v=3b3702bb2349"></script>
+    <script src="./app.js?v=912d565c51c1"></script>
   </body>
 </html>

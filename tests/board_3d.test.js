@@ -26,6 +26,10 @@ test('every Mirror hold has a footprint and a corresponding raised playback anch
     const { depth, outline } = geometry.holds[id];
     assert.ok(depth > 0 && depth < 4);
     assert.ok(outline.length >= 3 && outline.every(pair => pair.length === 2 && pair.every(Number.isFinite)));
-    assert.deepEqual(anchor, { ...original.get(id), z: depth });
+    const {gripPatch,...mount}=anchor;
+    assert.deepEqual(mount, { ...original.get(id), z: depth });
+    assert.equal(gripPatch.z,depth);
+    assert.ok(gripPatch.width>0);
+    assert.ok(Math.hypot(gripPatch.x-anchor.x,gripPatch.y-anchor.y) <= .49*Math.max(...outline.map(p=>Math.hypot(...p))));
   }
 });

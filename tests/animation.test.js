@@ -23,6 +23,11 @@ test('sampled playback retains planted anchors, stable bend directions and fixed
     const frame = timeline.sample(t), pose = frame.pose, segment = timeline.segments[frame.stepIndex];
     const pelvis = Board.toWorld([pose.torso.x, pose.torso.y, pose.depth.pelvis]);
     assert.ok(pelvis[1] >= 4.499);
+    assert.ok(pose.diagnostics.footClearance>=IK.FOOT_BELOW_HEAD-1e-6);
+    const height=key=>Board.toWorld([pose.points[key].x,pose.points[key].y,pose.depth[key]])[1];
+    for(const part of ['leftFoot','rightFoot','leftHeel','rightHeel','leftAnkle','rightAnkle']) {
+      assert.ok(height('head')-height(part)>=IK.FOOT_BELOW_HEAD-1e-6);
+    }
     for (const limb of Object.keys(segment.contacts)) {
       if (limb === segment.step.limb) continue;
       const expected = placements.get(segment.contacts[limb]);
@@ -135,4 +140,26 @@ test('hold forces oppose gravity and its turning moment in a supported hang', ()
   assert.ok(balance.forceResidual < 0.06);
   assert.ok(balance.torqueResidual < 1);
   assert.ok(balance.contacts.filter(c => c.limb.endsWith('Foot')).every(c => c.force.y > 0.06));
+  const range=IK.forceRanges(pose,balance);
+  assert.ok(range.scenarios>1);
+  assert.ok(range.rows.some(row=>row.max-row.min>1));
+  assert.ok(range.rows.every(row=>row.min<=row.percent && row.percent<=row.max && row.max<=200));
+  assert.equal(IK.forceRanges(pose,{...balance,forceResidual:.8}),null);
+});
+
+test('a mapped grip anchors the hand and force at the same hold patch',()=>{
+  const placements=new Map([
+    ['lh',{x:-12,y:57,z:1,gripPatch:{x:-11.3,y:57.7,z:1,width:2}}],
+    ['rh',{x:12,y:56,z:1,gripPatch:{x:12.2,y:57,z:1,width:4}}],
+    ['lf',{x:-11,y:12,z:1}],['rf',{x:12,y:12,z:1}],
+  ]);
+  const contacts={leftHand:'lh',rightHand:'rh',leftFoot:'lf',rightFoot:'rf'};
+  const pose=IK.poseAt({x:0,y:37,theta:0},contacts,placements,
+    {space:{depth:15,pitch:-.24,hipYaw:0,chestYaw:0}});
+  assert.deepEqual(pose.points.leftHand,{x:-11.3,y:57.7});
+  const reactions=IK.supportForces(pose);
+  assert.deepEqual(reactions.contacts[0].origin,{x:-11.3,y:57.7,z:1});
+  assert.ok(pose.diagnostics.jointAnglesDeg.leftDigit2PIP>pose.diagnostics.jointAnglesDeg.rightDigit2PIP);
+  assert.ok(pose.diagnostics.jointAnglesDeg.leftWrist>1);
+  assert.ok(pose.hands.left.fingers.every(chain=>chain.every(point=>Number.isFinite(point.z))));
 });

@@ -19,10 +19,24 @@
   const skin = [.72, .48, .32], shirt = [.98, .60, .29], pants = [.13, .30, .34], rubber = [.14, .17, .18];
   const defaultView = { yaw: .47, pitch: .21, distance: 258 };
 
+  function gripPatch(hold,spec) {
+    if (!spec?.outline?.length) return null;
+    const reviewed=hold.profile?.verified && !hold.profile.unknown && hold.profile.pull;
+    const toward=reviewed ? unit([-reviewed.x,-reviewed.y,0]) : [0,1,0];
+    const across=[-toward[1],toward[0],0];
+    const ranked=spec.outline.map(([x,y])=>({x,y,reach:x*toward[0]+y*toward[1]})).sort((a,b)=>b.reach-a.reach);
+    const [tip,neighbor=tip]=ranked;
+    const widths=spec.outline.map(([x,y])=>x*across[0]+y*across[1]);
+    // Stay just inside the top band of the reconstructed hold mesh.
+    const rim=.43;
+    return {x:hold.x+rim*(tip.x*.75+neighbor.x*.25),y:hold.y+rim*(tip.y*.75+neighbor.y*.25),z:spec.depth,
+      width:Math.max(...widths)-Math.min(...widths),reviewed:Boolean(reviewed)};
+  }
   function contactPlacements(placements, geometry) {
-    return new Map([...placements].map(([id, hold]) => [
-      id, { ...hold, z: geometry?.holds?.[id]?.depth || 0 },
-    ]));
+    return new Map([...placements].map(([id,hold])=>{
+      const spec=geometry?.holds?.[id];
+      return [id,{...hold,z:spec?.depth||0,gripPatch:gripPatch(hold,spec)}];
+    }));
   }
 
   class Mesh {
@@ -136,7 +150,13 @@
       mesh.ellipsoid(elbow, [1.42,1.42,1.42], skin);
       mesh.tube(elbow, wrist, 1.4, .76, skin);
       mesh.tube(wrist, hand, .79, .89, skin);
-      mesh.ellipsoid(hand, [.88, .8, .75], skin);
+      mesh.ellipsoid(hand, [.75, .68, .60], skin);
+      for(const chain of pose.hands?.[side]?.fingers || []) {
+        for(let i=1;i<chain.length;i++) {
+          const from=chain[i-1],to=chain[i];
+          mesh.tube([from.x,from.y,from.z],[to.x,to.y,to.z],.19-i*.025,.17-i*.025,skin);
+        }
+      }
       mesh.tube(shoulder, mix(shoulder, elbow, .30), 2.58, 2.25, shirt);
     }
     const pelvis = p('pelvis'), neck = p('neck'), head = p('head');
@@ -186,7 +206,8 @@
     if (balance.gravity) arrow(balance.center, balance.gravity, [1, .76, .26]);
     for (const { limb, origin, force } of balance.contacts) {
       const direction = balance.onHold ? {x:-force.x,y:-force.y,z:-force.z} : force;
-      const color = balance.analysis && limb.endsWith('Foot') ? [.91,.53,1] : [.37,.95,1];
+      const color = (balance.analysis || balance.beta) && limb.endsWith('Foot') ? [.91,.53,1] : [.37,.95,1];
+      if(balance.beta) mesh.ellipsoid([origin.x,origin.y,origin.z],[.57,.57,.57],color);
       arrow(origin, direction, color);
     }
     return mesh;
@@ -315,7 +336,7 @@
       redraw();
     }
     function zoom(factor) {
-      view.distance = clamp(view.distance * factor, 84, 650);
+      view.distance = clamp(view.distance * factor, 32, 650);
       redraw();
     }
     function pan(dx, dy) {
@@ -364,6 +385,11 @@
     preset('reset');
     return {
       preset, zoom,
+      focus(point) {
+        target=toWorld([point.x,point.y,point.z||0]);
+        view.distance=62;
+        redraw();
+      },
       update(nextRoute, nextActive, nextPose, nextBalance) {
         const id = nextActive == null ? null : String(nextActive);
         if (route !== nextRoute || activeId !== id) routeDirty = true;

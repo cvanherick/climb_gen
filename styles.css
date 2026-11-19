@@ -300,16 +300,29 @@ h1 em { color: var(--lime); font-style: normal; }
 .is-3d .board-angle { color: #d0dcd2; pointer-events: none; }
 .is-3d .board-hint { display: none; }
 .board-3d-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; }
-.board-3d-controls { display: flex; flex-wrap: wrap; gap: 5px; }
+.board-3d-controls { display: flex; flex:1 0 100%; flex-wrap: wrap; gap: 5px; }
 .board-3d-tools p, .board-3d-error { margin: 0; color: #aebbb4; font: 11px/1.4 var(--sans); }
 .board-3d-error { padding: 10px 12px; }
 .playback-controls .playback-position { flex: 1 0 100%; margin-left: 0; min-height: 30px; }
 .playback-position input { flex: 1; min-width: 0; accent-color: var(--lime); }
-.board-3d-force-toggle { display: inline-flex; gap: 5px; align-items: center; color: #e0ede1; font-size: 12px; }
+.board-3d-force-toggle { display: inline-flex; gap: 5px; align-items: center; color: #e0ede1; font-size: 12px; margin-left: auto; }
 .board-3d-force-toggle input { accent-color: var(--lime); }
-#board-3d-force-legend span { margin-right: 7px; font-weight: 600; }
-#board-3d-force-legend span:first-child { color: #ffc242; }
-#board-3d-force-legend span:nth-child(2) { color: #61ebf8; }
+.hold-loads { width:100%; padding:10px 12px; border:1px solid #415455; border-radius:8px; background:#162324; }
+.hold-loads header { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.hold-loads h3 { margin:0; font:600 14px var(--display); }
+.hold-loads header span { color:#b1c1bb; font:500 11px var(--mono); }
+.hold-load-rows { margin:4px 0; }
+.hold-load-rows > div { display:flex; justify-content:space-between; gap:12px; border-top:1px solid #2b3d3d; padding:6px 0; }
+.hold-load-rows dt { font-size:12px; }
+.hold-load-rows button { font:inherit; border:0; padding:0; color:#d1e7e1; background:none; cursor:pointer; }
+.hold-load-rows button:hover { text-decoration:underline; }
+.hold-load-rows dd { margin:0; font:500 12px var(--mono); color:var(--text); }
+.hold-load-key { display:flex; flex-wrap:wrap; gap:12px; }
+.hold-load-key span:first-child { color:#67e8f9; }
+.hold-load-key span:nth-child(2) { color:#e7a5ff; }
+.hold-load-key span:last-child { color:#ffc761; }
+.hold-loads details { color:#a9b8b3; font-size:11px; }
+.hold-loads summary { cursor:pointer; }
 
 /* TB2 video analysis */
 .home-options { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 1080px; }

@@ -43,7 +43,8 @@
     const overhangDeg = options.overhangDeg ?? 40;
     const maxReachViolation = options.maxReachViolation ?? 0.75;
     const feasible = pose => Number.isFinite(pose.diagnostics.estimatedCost)
-      && pose.diagnostics.maxReachViolation <= maxReachViolation && pose.diagnostics.maxSegmentResidual <= 0.25;
+      && pose.diagnostics.maxReachViolation <= maxReachViolation && pose.diagnostics.maxSegmentResidual <= 0.25
+      && pose.diagnostics.maxFootHeightViolation < .05;
     // Rank actual toe placements around a low, uncrossed sit start. Both hands
     // already occupy the start hold(s), so those are unavailable to the feet.
     const stances = [];
@@ -194,7 +195,7 @@
             const movementQualityPenalty = crossPenalty + highFootPenalty + lungeBias + supportPenalty + stancePenalty;
             const next = {
               contacts, initialContacts: current.initialContacts, visited, pose, depth: depth + 1,
-              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + weights.stability * diag.stabilityCost + (diag.holdDirectionCost || 0) * 0.6 + (diag.footDifficultyCost || 0) * 0.15 + (diag.handDifficultyCost || 0) * 0.1 + repeatsLimb + movementQualityPenalty,
+              g: current.g + weights.movement * (1 + movement / 52) + weights.effort * torsoMove / 90 + weights.reach * diag.maxReachViolation + weights.awkwardness * diag.maxAngleViolationDeg + .055 * diag.articulationCost + weights.stability * diag.stabilityCost + (diag.holdDirectionCost || 0) * 0.6 + (diag.footDifficultyCost || 0) * 0.15 + (diag.handDifficultyCost || 0) * 0.1 + repeatsLimb + movementQualityPenalty,
               path: [...current.path, { limb, label: labels[limb], movementType, movementDistance: movement, releaseSupportDistance: releaseDistance, movementQualityPenalty, id: target.id, role: target.role, contacts, pose, diagnostics: diag }],
             };
             const key = keyOf(next), previousCost = seen.get(key);

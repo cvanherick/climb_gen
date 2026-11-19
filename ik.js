@@ -14,7 +14,7 @@
     kneeMinDeg: 42, kneeMaxDeg: 145,
     torsoAngleLimit: 0.48, hipAngleLimit: 0.40,
     pelvisTorsoAngleLimit: 0.18,
-    palmLength: 1.5, fingerLength: 1.1, footLength: 3.4,
+    palmLength: 1.5, fingerLength: 1.58, footLength: 3.4,
 
   });
 
@@ -22,9 +22,34 @@
     leftHand: { kind: 'arm', side: -1 }, rightHand: { kind: 'arm', side: 1 },
     leftFoot: { kind: 'leg', side: -1 }, rightFoot: { kind: 'leg', side: 1 },
   });
+  const DEG = 180 / Math.PI;
+  const RAD = Math.PI / 180;
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const vector = (a, b) => [b.x-a.x, b.y-a.y, (b.z||0)-(a.z||0)];
+  const dot = (a, b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const cross = ([x,y,z],[a,b,c]) => [y*c-z*b,z*a-x*c,x*b-y*a];
+  const unit = v => {const length=Math.hypot(...v)||1; return v.map(x=>x/length);};
+  const angleBetween = (u,v) => Math.atan2(Math.hypot(...cross(u,v)),dot(u,v))*DEG;
+  const addScaled = (p, v, t) => ({x:p.x+v[0]*t,y:p.y+v[1]*t,z:(p.z||0)+v[2]*t});
+  // Comfortable ranges for this avatar, with wider anatomical envelopes
+  // for unusual moves. Angles at the elbow and knee are included angles.
+  const JOINT_LIMITS = Object.freeze({
+    shoulderElevation:[0,170,0,180], shoulderCross:[-37,32,-75,65],
+    elbow:[66,162,35,180], wrist:[0,30,0,66],
+    hipElevation:[0,105,0,129], hipExtension:[0,23,0,35], hipSide:[-25,40,-48,65],
+    knee:[57,156,38,180], ankle:[-24,28,-55,42],
+    spine:[0,28,0,46], neck:[0,18,0,45],
+    fingerMCP:[0,71,0,90], fingerPIP:[0,92,0,108], fingerDIP:[0,65,0,80],
+  });
+  const FOOT_BELOW_HEAD = 5; // inches of clearance to any part of the shoe
+  const PLANNING_HEADROOM = 11; // room for the pelvis to hang and toes to lift
 
   function lookup(placements, id) {
     return placements instanceof Map ? placements.get(String(id)) || placements.get(id) : placements[String(id)];
+  }
+  function contactAnchor(limb,point) {
+    const patch=limb.endsWith('Hand') && point?.gripPatch;
+    return patch ? {...point,x:patch.x,y:patch.y,z:patch.z} : point;
   }
   function rootFor(limb, torso, body) {
     const spec = LIMBS[limb];
@@ -46,9 +71,16 @@
     const c = Math.cos(rotation), s = Math.sin(rotation);
     return { x: torso.x + offset[0] * c - offset[1] * s, y: torso.y + offset[0] * s + offset[1] * c };
   }
-  function lengths(limb, body) {
+  function wristFlex(limb, contact, motion) {
+    const open = motion?.movingLimb===limb ? 1-(motion.grip??1) : 0;
+    const profile=contact?.profile;
+    const sidePull=profile?.verified && !profile.unknown ? Math.abs(profile.pull?.x??0) : 0;
+    return 11+sidePull*11+open*9;
+  }
+  function lengths(limb, body, contact, motion) {
+    const wrist= LIMBS[limb].kind==='arm' ? wristFlex(limb,contact,motion) : 0;
     return LIMBS[limb].kind === 'arm'
-      ? [body.upperArm, body.lowerArm + body.palmLength]
+      ? [body.upperArm, Math.hypot(body.lowerArm+body.palmLength*Math.cos(wrist*RAD),body.palmLength*Math.sin(wrist*RAD))]
       : [body.upperLeg, body.lowerLeg];
   }
   function limbTarget(limb, contact, torso, body) {
@@ -59,7 +91,7 @@
   }
   const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y, (b.z || 0) - (a.z || 0));
   function shoeAt(toe, torso, body, side) {
-    const { swingSide, swing } = torso.space;
+    const { swingSide, swing } = torso.space || {};
     // A planted shoe retains its orientation as the pelvis moves. Rotate
     // the shoe during the swing, with a fixed toe and heel at either end.
     const roll = side * (0.22 + (side === swingSide ? 0.12 * swing : 0));
@@ -76,12 +108,31 @@
     };
     return { ankle: offset(body.footLength * 0.6, 1.5, 0.8), heel: offset(body.footLength, 0, 0) };
   }
+  function bodyHead(torso,body,motion) {
+    const pitch=torso.space?.pitch||0;
+    const left=rootFor('leftHand',torso,body),right=rootFor('rightHand',torso,body);
+    const neck={x:(left.x+right.x)/2,y:(left.y+right.y)/2,z:((left.z||0)+(right.z||0))/2};
+    const gaze=motion?.gazeTarget;
+    const tilt=gaze ? clamp(Math.atan2(gaze.x-neck.x,Math.max(12,gaze.y-neck.y)),-.32,.32)*(motion.attention??0) : 0;
+    const offset=body.headRadius*1.65;
+    const direction=torso.theta-tilt;
+    const head=addScaled(neck,[-Math.sin(direction)*Math.cos(pitch),Math.cos(direction)*Math.cos(pitch),Math.sin(pitch)],offset);
+    return {neck,head,tilt};
+  }
   function jointAngleDeg(a, b, d) {
     const cosine = Math.max(-1, Math.min(1, (a * a + b * b - d * d) / (2 * a * b)));
     return Math.acos(cosine) * 180 / Math.PI;
   }
   function segmentViolation(a, b, d) {
     return Math.max(0, Math.abs(a - b) + 1.5 - d, d - (a + b - 1.5));
+  }
+  function hipAngles(thigh,down,right,forward,side) {
+    const vertical=dot(thigh,down),ahead=dot(thigh,forward);
+    const extension=Math.asin(Math.max(0,-ahead))*DEG;
+    // Measure elevation in 3D. A wide lateral stance can make the
+    // sagittal projection vanish and suggest a false 180-degree fold.
+    const elevation=Math.acos(clamp(vertical,-1,1))*DEG;
+    return {elevation,extension,side:Math.asin(clamp(side*dot(thigh,right),-1,1))*DEG};
   }
   function twoBone(root, target, upper, lower, bendSide, outward = 0, knee = null) {
     const dx = target.x - root.x, dy = target.y - root.y, dz = (target.z || 0) - (root.z || 0);
@@ -92,23 +143,42 @@
     const across = Math.sqrt(Math.max(0, upper * upper - along * along));
     if (root.z != null) {
       if (knee) {
-        const center = { x: root.x + ux * along, y: root.y + uy * along, z: root.z + uz * along };
-        // Bend forward from the hip socket and keep left and right knee
-        // hinges on their respective sides as the foot swings.
-        const planar = Math.hypot(ux, uy);
-        const nx = planar > .00001 ? ux / planar : 0;
-        const ny = planar > .00001 ? uy / planar : -1;
-        // Restrict the kneecap to the free side of the board. Stay on one
-        // arc of the joint circle when that limits the usual bend direction.
-        const wallward = -0.62 + knee.side * knee.yaw * 0.3;
-        const clearance = (2.2 - center.z) / Math.max(0.00001, across * planar);
-        const normal = Math.max(wallward, Math.min(1, clearance));
-        const lateral = Math.sqrt(Math.max(0, 1 - normal ** 2)) * knee.side;
-        return {
-          x: center.x + across * (-normal * uz * nx - lateral * ny),
-          y: center.y + across * (-normal * uz * ny + lateral * nx),
-          z: center.z + across * normal * planar,
+        const center = addScaled(root,[ux,uy,uz],along);
+        // Transport the wall axes to the leg chord. This stays continuous
+        // when a planted toe passes directly below its hip in the board view.
+        const denom=Math.max(.001,1-uz);
+        const sideAxis=[1-ux*ux/denom,-ux*uy/denom,ux];
+        const upAxis=[-ux*uy/denom,1-uy*uy/denom,uy];
+        // A high foot needs room for the knee to open sideways and down.
+        // A low foot can use more upward knee travel before the next step.
+        const restPhase=Math.atan2(-.26-.55*uy,knee.side*.75)+knee.yaw*.35;
+        const onCircle=phase=>addScaled(center,
+          sideAxis.map((v,i)=>v*Math.cos(phase)+upAxis[i]*Math.sin(phase)),across);
+        const {down,right,forward}=knee.frame;
+        const loss=phase=>{
+          const point=onCircle(phase);
+          const thigh=unit(vector(root,point));
+          const ahead=dot(thigh,forward),vertical=dot(thigh,down),lateral=knee.side*dot(thigh,right);
+          const ankle=90-angleBetween(vector(target,point),knee.shoeAxis);
+          const behind=Math.max(0,-ahead-.43);
+          const folded=Math.max(0,-vertical-.36);
+          const spread=Math.max(0,-lateral-.58,lateral-.75);
+          const ankleExcess=Math.max(0,-37-ankle,ankle-35)/30;
+          const closeToWall=Math.max(0,2.2-point.z);
+          const lowKnee=Math.max(0,1.6-point.y*knee.upY+point.z*knee.upZ);
+          return 6*behind**2+14*folded**2+5*spread**2+ankleExcess**2+.24*(phase-restPhase)**2
+            +.25*closeToWall**2+.25*lowKnee**2;
         };
+        // Slide the kneecap along its analytic joint circle, preserving
+        // both bone lengths and the planted shoe.
+        let phase=restPhase+(knee.offset??0);
+        if(knee.offset==null) {
+          for(let i=0;i<8;i++) {
+            const slope=(loss(phase+.025)-loss(phase-.025))/.05;
+            phase=clamp(phase-clamp(slope*.04,-.10,.10),restPhase-1.25,restPhase+1.25);
+          }
+        }
+        return {...onCircle(phase),bendOffset:phase-restPhase};
       }
       // Rotate the bend plane out of the wall for the elbows, retaining
       // the path's selected left/right branch.
@@ -171,11 +241,12 @@
   }
   // A torso search can examine hundreds of poses on exactly the same holds.
   // Resolve those contacts and their support polygon once per stance.
-  function contactGeometry(contacts, placements, airborneLimb = null) {
+  function contactGeometry(contacts, placements, airborneLimb = null, spatial = false) {
     const targets = [], anchors = [];
     for (const [limb, id] of Object.entries(contacts)) {
       if (id == null) continue;
-      const target = lookup(placements, id);
+      const point=lookup(placements,id);
+      const target=spatial ? contactAnchor(limb,point) : point;
       targets.push({ limb, target });
       if (target && limb !== airborneLimb) anchors.push({ x: target.x, y: target.y });
     }
@@ -184,9 +255,12 @@
   function scoreTorso(torso, geometry, previous, body, overhangDeg) {
     let reachSquared = 0, angleSquared = 0, maxReachViolation = 0, maxAngleViolation = 0;
     let directionCost = 0, directionContacts = 0, reviewedContacts = 0, footDifficultyCost = 0, handDifficultyCost = 0;
+    let maxFootHeightViolation = 0;
+    // Leave room for the hips to hang farther out in spatial playback.
+    const headY=torso.y+(body.torsoLength+body.headRadius*1.65)*Math.cos(torso.theta);
     for (const { limb, target } of geometry.targets) {
       if (!target) return { cost: Infinity, maxReachViolation: Infinity, maxAngleViolation: Infinity };
-      const root = rootFor(limb, torso, body), [a, b] = lengths(limb, body);
+      const root = rootFor(limb, torso, body), [a, b] = lengths(limb, body, target);
       const boneTarget = limbTarget(limb, target, torso, body);
       const d = distance(root, boneTarget);
       // Hand pull direction is from hold toward the shoulder. Foot force signs
@@ -198,7 +272,12 @@
         if (direction.weight === 1) reviewedContacts++;
       }
       const reachViolation = segmentViolation(a, b, d);
-      if (LIMBS[limb].kind === 'leg') footDifficultyCost += spectrum?.footDifficulty(target, root).cost || 0;
+      if (LIMBS[limb].kind === 'leg') {
+        footDifficultyCost += spectrum?.footDifficulty(target, root).cost || 0;
+        maxFootHeightViolation=Math.max(maxFootHeightViolation,
+          boneTarget.y+(torso.space?FOOT_BELOW_HEAD:PLANNING_HEADROOM)-headY);
+        angleSquared+=.26*(Math.max(0,boneTarget.y-root.y-2)/9)**2;
+      }
       const difficulty = target.difficulty;
       if (LIMBS[limb].kind === 'arm' && Number.isInteger(difficulty?.handTier)) {
         handDifficultyCost += difficulty.handConfidence * (difficulty.handTier / 3) * (0.4 + 0.6 * Math.min(1, d / (a + b)));
@@ -227,8 +306,9 @@
       + ((torso.hipTheta || 0) / body.hipAngleLimit) ** 2 * 0.1
       + ((torso.theta - (torso.hipTheta || 0)) / 0.7) ** 2 * 0.12;
     return {
-      cost: reachSquared * 12 + angleSquared * 4 + supportCost * 2.4 + effort * 0.12 + orientationCost + directionCost * 3 + footDifficultyCost * 0.35 + handDifficultyCost * 0.25,
+      cost: reachSquared * 12 + angleSquared * 4 + supportCost * 2.4 + effort * 0.12 + orientationCost + directionCost * 3 + footDifficultyCost * 0.35 + handDifficultyCost * 0.25 + maxFootHeightViolation ** 2 * 20,
       maxReachViolation, maxAngleViolation, supportCost, directionCost, footDifficultyCost, handDifficultyCost, directionContacts, reviewedContacts, com, hull,
+      maxFootHeightViolation,
       reachable: maxReachViolation < 0.1,
       kinematic: maxReachViolation < 0.1 && maxAngleViolation < 0.1,
     };
@@ -254,42 +334,45 @@
     }
     return { torso, score: best };
   }
-  function extremities(pose, body, motion) {
-    const unit = (a, b) => {
-      const d = Math.max(1e-6, Math.hypot(b.x - a.x, b.y - a.y));
-      return { x: (b.x - a.x) / d, y: (b.y - a.y) / d };
-    };
+  function digitAngles(digit,grip,width=4) {
+    const small=clamp((3.5-width)/2.5,0,1);
+    return digit===0 ? [18+20*grip,15+21*grip,8+10*grip] :
+      [10+(41-20*small)*grip,9+(57+21*small)*grip,6+(27-12*small)*grip];
+  }
+  function extremities(pose, body, motion, jointsOnly) {
     pose.hands = {}; pose.feet = {};
     for (const side of ['left', 'right']) {
       const sign = side === 'left' ? -1 : 1;
       const contact = pose.points[side + 'Hand'], elbow = pose.points[side + 'Elbow'];
       const toe = pose.points[side + 'Foot'], knee = pose.points[side + 'Knee'];
       if (contact && elbow) {
-        const grip = motion?.movingLimb === side + 'Hand' ? motion.grip : 1;
-        const axis = unit(elbow, contact), lateral = { x: -axis.y, y: axis.x };
-        const handDepth = pose.depth?.[side + 'Hand'] || 0;
-        const elbowDepth = pose.depth?.[side + 'Elbow'] || 0;
-        const fraction = body.palmLength / Math.max(1e-6, distance({ ...elbow, z: elbowDepth }, { ...contact, z: handDepth }));
-        const wrist = { x: contact.x + (elbow.x - contact.x) * fraction, y: contact.y + (elbow.y - contact.y) * fraction };
-        pose.points[side + 'Wrist'] = wrist;
-        if (pose.depth) pose.depth[side + 'Wrist'] = handDepth + (elbowDepth - handDepth) * fraction;
+        const grip = motion?.movingLimb === side + 'Hand' ? clamp(motion.grip??1,0,1) : 1;
+        const hand3d={...contact,z:pose.depth?.[side+'Hand']};
+        const wrist = twoBone({...elbow,z:pose.depth?.[side+'Elbow']},hand3d,body.lowerArm,body.palmLength,sign,-.72);
+        pose.points[side + 'Wrist'] = {x:wrist.x,y:wrist.y};
+        if (pose.depth) pose.depth[side + 'Wrist'] = wrist.z;
         const fingers = [];
-        // Five three-segment digit chains curl toward the contact. Their
-        // lengths and curl are illustrative; the contact anchor stays fixed.
-        for (let digit = 0; digit < 5; digit++) {
-          const spread = (digit - 2) * (0.28 + (1 - grip) * 0.12);
-          const base = { x: contact.x - axis.x * 0.45 + lateral.x * spread, y: contact.y - axis.y * 0.45 + lateral.y * spread };
-          const chain = [base];
-          let angle = Math.atan2(axis.y, axis.x) + (digit === 0 ? sign * 0.7 : 0);
-          const length = body.fingerLength * (digit === 0 ? 0.7 : digit === 2 ? 1 : 0.86);
-          for (let joint = 0; joint < 3; joint++) {
-            angle += sign * (joint ? 0.12 + 0.53 * grip : 0.15);
-            const last = chain.at(-1), segment = length * [0.44, 0.33, 0.23][joint];
-            chain.push({ x: last.x + Math.cos(angle) * segment, y: last.y + Math.sin(angle) * segment });
+        const width=pose.gripPatches?.[side+'Hand']?.width;
+        const flexion=Array.from({length:5},(_,digit)=>digitAngles(digit,grip,width));
+        if (!jointsOnly) {
+          const palm=unit(vector(wrist,hand3d));
+          const across=unit(Math.hypot(palm[0],palm[1])>.001?[-palm[1],palm[0],0]:[1,0,0]);
+          const inward=unit(cross(across,palm));
+          for (const [digit,angles] of flexion.entries()) {
+            const spread=(digit-2)*(Math.min(.28,(width??3)/6)+(1-grip)*.12);
+            const base=addScaled(addScaled(hand3d,palm,-.56),across,spread);
+            const length=body.fingerLength*(digit===0?.7:digit===2?1:.86);
+            const chain=[base];
+            let angle=0;
+            for(const [i,fraction] of [.44,.33,.23].entries()) {
+              angle+=angles[i]*RAD;
+              const direction=palm.map((u,k)=>u*Math.cos(angle)+inward[k]*Math.sin(angle));
+              chain.push(addScaled(chain.at(-1),direction,length*fraction));
+            }
+            fingers.push(chain);
           }
-          fingers.push(chain);
         }
-        pose.hands[side] = { wrist, contact, fingers };
+        pose.hands[side] = { wrist, contact, fingers, flexion };
       }
       if (toe && knee) {
         const angle = (pose.torso.hipTheta || 0) + sign * 0.22;
@@ -307,6 +390,57 @@
       }
     }
   }
+  function articulation(pose,headTilt,overhangDeg) {
+    const angles={}, outside={};
+    let comfort=0;
+    const add=(name,type,value)=>{
+      const [min,max,hardMin,hardMax]=JOINT_LIMITS[type];
+      angles[name]=value;
+      if(value<hardMin || value>hardMax) outside[name]=Math.max(hardMin-value,value-hardMax);
+      comfort+=(Math.max(0,min-value,value-max)/25)**2;
+    };
+    const p=name=>({...pose.points[name],z:pose.depth?.[name]});
+    const up=unit(vector(p('pelvis'),p('neck')));
+    const chestRight=unit(vector(p('leftShoulder'),p('rightShoulder')));
+    const hipRight=unit(vector(p('leftHip'),p('rightHip')));
+    const hipForward=unit(cross(up,hipRight));
+    const down=up.map(x=>-x);
+    const height=point=>point.y*Math.cos(overhangDeg*RAD)-(point.z||0)*Math.sin(overhangDeg*RAD);
+    let footClearance=Infinity;
+    add('spine','spine', Math.hypot(pose.torso.theta-(pose.torso.hipTheta||0),
+      (pose.torso.space?.chestYaw||0)-(pose.torso.space?.hipYaw||0),pose.torso.space?.pitch||0)*DEG);
+    add('neck','neck',Math.abs(headTilt)*DEG);
+    for(const side of ['left','right']) {
+      const sign=side==='left'?-1:1;
+      const name=joint=>side+joint;
+      if(pose.hands[side]) {
+        const shoulder=p(name('Shoulder')),elbow=p(name('Elbow')),wrist=p(name('Wrist')),hand=p(name('Hand'));
+        const arm=unit(vector(shoulder,elbow));
+        add(name('ShoulderElevation'),'shoulderElevation',angleBetween(down,arm));
+        add(name('ShoulderCross'),'shoulderCross',Math.asin(clamp(-sign*dot(chestRight,arm),-1,1))*DEG);
+        add(name('Elbow'),'elbow',angleBetween(vector(elbow,shoulder),vector(elbow,wrist)));
+        add(name('Wrist'),'wrist',angleBetween(vector(elbow,wrist),vector(wrist,hand)));
+        for(const [i,flexion] of pose.hands[side].flexion.entries()) {
+          for(const [j,joint] of ['MCP','PIP','DIP'].entries()) {
+            const jointName=i===0?'Thumb'+['CMC','MCP','IP'][j]:'Digit'+i+joint;
+            add(name(jointName),'finger'+joint,flexion[j]);
+          }
+        }
+      }
+      if(pose.feet[side]) {
+        const hip=p(name('Hip')),knee=p(name('Knee')),ankle=p(name('Ankle')),toe=p(name('Foot')),heel=p(name('Heel'));
+        const thigh=unit(vector(hip,knee));
+        const hipMotion=hipAngles(thigh,down,hipRight,hipForward,sign);
+        add(name('HipElevation'),'hipElevation',hipMotion.elevation);
+        add(name('HipExtension'),'hipExtension',hipMotion.extension);
+        add(name('HipSide'),'hipSide',hipMotion.side);
+        add(name('Knee'),'knee',angleBetween(vector(knee,hip),vector(knee,ankle)));
+        add(name('Ankle'),'ankle',90-angleBetween(vector(ankle,knee),vector(heel,toe)));
+        for(const part of [toe,heel,ankle]) footClearance=Math.min(footClearance,p('head').y-part.y,height(p('head'))-height(part));
+      }
+    }
+    return {angles,outside,comfort,footClearance,maxViolation:Math.max(0,...Object.values(outside))};
+  }
   function constrainTorso(torso, geometry, body, space, motion, overhangDeg, pitchAdjustments = 2) {
     const constrained = clampTorsoArticulation({ ...torso, space }, body);
     // Each planted hand or shoe defines a reach sphere for the pelvis.
@@ -316,43 +450,63 @@
       const contact = { ...target, z: target.z || 0 };
       const root = rootFor(limb, constrained, body);
       const end = limbTarget(limb, contact, constrained, body);
-      const [upper, lower] = lengths(limb, body);
+      const [upper, lower] = lengths(limb, body, target, motion);
       const leg = LIMBS[limb].kind === 'leg';
       const kneeAngle = 122 - (limb === motion?.supportFoot ? 9 * (motion.load || 0) : 0);
-      const flexed = Math.sqrt(upper ** 2 + lower ** 2 - 2 * upper * lower * Math.cos(kneeAngle * Math.PI / 180));
+      const reach = degrees=>Math.sqrt(upper ** 2 + lower ** 2 - 2 * upper * lower * Math.cos(degrees*RAD));
       return { x: torso.x + end.x - root.x, y: torso.y + end.y - root.y,
-        z: space.depth + end.z - root.z, radius: upper + lower - 0.65, flexed: leg ? flexed : null };
+        z: space.depth + end.z - root.z, radius: upper + lower - 0.65,
+        minRadius:reach(JOINT_LIMITS[leg?'knee':'elbow'][2]+1), flexed: leg ? reach(kneeAngle) : null };
     });
     let depth = space.depth;
     const wallAngle = overhangDeg * Math.PI / 180;
     const upY = Math.cos(wallAngle), upZ = -Math.sin(wallAngle);
+    const height = p => p.y*upY+(p.z||0)*upZ;
+    // Use the lowest possible gaze within the current neck angle so later
+    // torso projection cannot invalidate the clearance through a head turn.
+    const head=bodyHead(constrained,body).head;
+    head.y-=body.headRadius*1.65*(Math.cos(constrained.theta)-Math.cos(Math.abs(constrained.theta)+.32*(motion?.attention??0)));
+    const offsetY=head.y-torso.y, offsetHeight=height(head)-height({y:torso.y,z:depth});
+    let minY=-Infinity,minHeight=4.5;
+    for(const {limb,target} of geometry.targets) if (LIMBS[limb].kind==='leg') {
+      const shoe=shoeAt(target,constrained,body,LIMBS[limb].side);
+      for(const point of [target,shoe.heel,shoe.ankle]) {
+        minY=Math.max(minY,point.y+FOOT_BELOW_HEAD-offsetY);
+        minHeight=Math.max(minHeight,height(point)+FOOT_BELOW_HEAD-offsetHeight);
+      }
+    }
     function clearFloor() {
-      const correction = Math.max(0, 4.5 - constrained.y * upY - depth * upZ);
+      const boardCorrection=Math.max(0,minY-constrained.y);
+      constrained.y+=boardCorrection;
+      const correction = Math.max(0, minHeight - constrained.y * upY - depth * upZ);
       constrained.y += upY * correction;
       depth += upZ * correction;
-      return correction;
+      return correction+boardCorrection;
     }
-    function project(limit, radius, weight) {
+    function project(limit, radius, weight, minimum=false) {
       const dx = constrained.x - limit.x, dy = constrained.y - limit.y, dz = depth - limit.z;
       const dist = Math.hypot(dx, dy, dz);
-      if (dist <= radius) return 0;
+      if (minimum ? dist>=radius : dist<=radius) return 0;
+      if (dist<1e-8) {constrained.y+=radius*weight;return radius*weight;}
       const correction = (dist - radius) * weight;
       constrained.x -= dx * correction / dist;
       constrained.y -= dy * correction / dist;
       depth -= dz * correction / dist;
-      return correction;
+      return Math.abs(correction);
     }
     // Bias the pose toward usable knee flexion. The final reach pass can
     // relax this preference when contacts span an unusually long stance.
     for (let iteration = 0; iteration < 9; iteration++) {
       for (const limit of limits) {
         if (limit.flexed) project(limit, limit.flexed, 0.5);
+        project(limit,limit.minRadius,.65,true);
         project(limit, limit.radius, 1);
       }
       clearFloor();
     }
     for (let iteration = 0; iteration < 42; iteration++) {
-      const reachCorrection = limits.reduce((sum, limit) => sum + project(limit, limit.radius, 1), 0);
+      const reachCorrection = limits.reduce((sum, limit) =>
+        sum + project(limit,limit.minRadius,.7,true) + project(limit,limit.radius,1),0);
       if (reachCorrection + clearFloor() < 0.001) break;
     }
     // On a long reach the pelvis can be drawn closer to the board. Ease
@@ -361,7 +515,7 @@
     if (pitchAdjustments && space.pitch < minPitch - 0.002) {
       return constrainTorso(torso, geometry, body, { ...space, pitch: minPitch }, motion, overhangDeg, pitchAdjustments - 1);
     }
-    constrained.space = { ...space, depth };
+    constrained.space = { ...constrained.space, depth };
     return constrained;
   }
   function clampTorsoArticulation(torso, body) {
@@ -372,40 +526,13 @@
     // pelvic counter-rotation for foot placements, but avoid a sharp waist kink.
     const hipTheta = Math.max(theta - hipLimit, Math.min(theta + hipLimit,
       Math.max(-body.hipAngleLimit, Math.min(body.hipAngleLimit, requestedHip))));
-    return { ...torso, theta, hipTheta };
-  }
-  function keepHipsBelowHead(torso, body, overhangDeg, gaze, attention = 0) {
-    const angle = overhangDeg * Math.PI / 180;
-    const worldHeight = point => point.y * Math.cos(angle) - (point.z || 0) * Math.sin(angle);
-    const clearance = candidate => {
-      const pose = { ...torso, theta: candidate };
-      const left = rootFor('leftFoot', pose, body), right = rootFor('rightFoot', pose, body);
-      const a = rootFor('leftHand', pose, body), b = rootFor('rightHand', pose, body);
-      const neck = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: ((a.z || 0) + (b.z || 0)) / 2 };
-      const tilt = gaze ? Math.max(-0.32, Math.min(0.32,
-        Math.atan2(gaze.x - neck.x, Math.max(12, gaze.y - neck.y)))) * attention : 0;
-      const offset = body.headRadius * 1.65;
-      const pitch = pose.space?.pitch || 0;
-      const head = {
-        y: neck.y + offset * Math.cos(pose.theta - tilt) * Math.cos(pitch),
-        z: neck.z + offset * Math.sin(pitch),
-      };
-      return worldHeight(head) - Math.max(worldHeight(left), worldHeight(right));
-    };
-    const limit = body.torsoAngleLimit;
-    if (clearance(torso.theta) >= 2.5) return torso;
-    // A reach may ask for a pose that folds the torso upside down. Choose the
-    // nearest legal torso angle that keeps both hip sockets clearly below the
-    // head in world vertical, accounting for the board's 40° overhang.
-    let best = 0, distance = Infinity;
-    for (let i = 0; i <= 64; i++) {
-      const candidate = -limit + 2 * limit * i / 64;
-      if (clearance(candidate) >= 2.5 && Math.abs(candidate - torso.theta) < distance) {
-        best = candidate;
-        distance = Math.abs(candidate - torso.theta);
-      }
-    }
-    return { ...torso, theta: best };
+    const space=torso.space;
+    if (!space) return { ...torso, theta, hipTheta };
+    const hipYaw=clamp(space.hipYaw||0,-.3,.3);
+    const chestYaw=clamp(space.chestYaw||0,hipYaw-.25,hipYaw+.25);
+    const pitchLimit=Math.sqrt((JOINT_LIMITS.spine[3]*RAD)**2-(theta-hipTheta)**2-(chestYaw-hipYaw)**2);
+    return { ...torso, theta, hipTheta, space:{...space,hipYaw,chestYaw,
+      pitch:clamp(space.pitch||0,-Math.min(.72,pitchLimit),.24)} };
   }
   function solve(contacts, placements, previous = null, options = {}) {
     const body = { ...DEFAULT_BODY, ...(options.body || {}) };
@@ -445,7 +572,7 @@
     }
     return { x: center.x / total, y: center.y / total, z: center.z / total };
   }
-  function supportForces(pose, overhangDeg = 40, previousContacts = null) {
+  function supportForces(pose, overhangDeg = 40, previousContacts = null, scenario) {
     const center = pose.diagnostics.centerOfMass;
     if (!pose.depth || !Number.isFinite(center.z)) return null;
     const wallAngle = overhangDeg * Math.PI / 180;
@@ -486,6 +613,12 @@
         let axis = [origin.x - elbow.x, origin.y - elbow.y, Math.min(-.025, origin.z - elbowDepth)];
         const magnitude = Math.hypot(...axis) || 1;
         axis = axis.map(value => value / magnitude);
+        const shoulderKey=limb.replace('Hand','Shoulder');
+        const shoulder=pose.points[shoulderKey];
+        if(shoulder) {
+          const upper=unit(vector({...shoulder,z:pose.depth[shoulderKey]},origin));
+          axis=unit(axis.map((v,i)=>v*.76+upper[i]*.24));
+        }
         // Reviewed hold-direction annotations describe the climber pulling
         // on the hold; reverse that vector for the reaction on the hand.
         // Use them only when explicitly reviewed, since inferred labels do
@@ -504,11 +637,17 @@
         side = side.map(value => value / sideLength);
         const normal = [axis[1] * side[2] - axis[2] * side[1],
           axis[2] * side[0] - axis[0] * side[2], axis[0] * side[1] - axis[1] * side[0]];
+        const fingers=pose.hands?.[limb.startsWith('left')?'left':'right']?.flexion;
+        const fingerClosure=(fingers?.[2]?.[1]??65)/90;
+        const edgeWidth=pose.gripPatches?.[limb]?.width;
+        // The hand posture only steers the directional prior. It says
+        // nothing about a particular climber's strength or grip capacity.
+        const spread=clamp(.65-.13*fingerClosure-.03*Math.max(0,3-(edgeWidth??3))+(scenario?.spread??0),.3,.8);
         directions = [axis,
-          axis.map((value, i) => value + .55 * side[i]),
-          axis.map((value, i) => value - .55 * side[i]),
-          axis.map((value, i) => value + .55 * normal[i]),
-          axis.map((value, i) => value - .55 * normal[i])];
+          axis.map((value, i) => value + spread * side[i]),
+          axis.map((value, i) => value - spread * side[i]),
+          axis.map((value, i) => value + spread * normal[i]),
+          axis.map((value, i) => value - spread * normal[i])];
         directions = directions.map(ray => {
           ray[2] = Math.min(-.001, ray[2]);
           const length = Math.hypot(...ray) || 1;
@@ -520,7 +659,7 @@
           (dz * x - dx * z) / torqueScale, (dx * y - dy * x) / torqueScale];
         // Penalize each contact's resultant force to avoid large cancelling
         // reactions and solutions that depend on how many rays it has.
-        const regularization = spec.kind === 'leg' ? 0.025 : 0.055;
+        const regularization = (spec.kind === 'leg' ? 0.025 : 0.055)*(scenario?.limb===limb?scenario.effort:1);
         const previous = previousContacts?.find(contact => contact.limb === limb)?.force;
         const continuity = previous ? .07 : 0;
         const norm = column.reduce((sum, value) => sum + value ** 2, 0.004)
@@ -547,8 +686,37 @@
         ray.coefficient = next;
       }
     }
+    // Rebuild from the nonnegative coefficients. Incremental updates can
+    // leave a tiny reaction with the wrong sign when a contact unloads.
+    for(const {force} of contacts) force.x=force.y=force.z=0;
+    for(const {force,column,coefficient} of basis) {
+      force.x+=column[0]*coefficient;
+      force.y+=column[1]*coefficient;
+      force.z+=column[2]*coefficient;
+    }
     return { center, gravity, contacts, forceResidual: Math.hypot(...residual.slice(0, 3)),
       torqueResidual: Math.hypot(...residual.slice(3)) * torqueScale };
+  }
+  function usableBalance(balance) {
+    return Boolean(balance && balance.contacts.length>=2 && balance.forceResidual<=.16 && balance.torqueResidual<=4
+      && balance.contacts.every(({force})=>Math.hypot(force.x,force.y,force.z)<=2));
+  }
+  function forceRanges(pose, balance=supportForces(pose), overhangDeg=40) {
+    if(!usableBalance(balance)) return null;
+    const magnitude=({force})=>100*Math.hypot(force.x,force.y,force.z);
+    const rows=balance.contacts.map(c=>({limb:c.limb,percent:magnitude(c),min:magnitude(c),max:magnitude(c)}));
+    let scenarios=1;
+    for(const {limb} of balance.contacts) for(const effort of [.15,4]) {
+      const trial=supportForces(pose,overhangDeg,null,{limb,effort,spread:effort<1?.12:-.06});
+      if(!usableBalance(trial)) continue;
+      scenarios++;
+      for(const [i,c] of trial.contacts.entries()) {
+        const percent=magnitude(c);
+        rows[i].min=Math.min(rows[i].min,percent);
+        rows[i].max=Math.max(rows[i].max,percent);
+      }
+    }
+    return {rows,scenarios};
   }
   // Playback projects the requested pose onto the reach limits without
   // rerunning the planner's search for a preferred stance.
@@ -556,11 +724,9 @@
     const body = { ...DEFAULT_BODY, ...(options.body || {}) };
     const motion = options.motion;
     const requestedTorso = torso;
-    const geometry = contactGeometry(contacts, placements, motion?.airborne ? motion.movingLimb : null);
+    const geometry = contactGeometry(contacts, placements, motion?.airborne ? motion.movingLimb : null,Boolean(options.space));
     if (options.space) torso = constrainTorso(torso, geometry, body, options.space, motion, options.overhangDeg ?? 40);
     else torso = clampTorsoArticulation(torso, body);
-    if (torso.space) torso = clampTorsoArticulation(keepHipsBelowHead(torso, body,
-      options.overhangDeg ?? 40, motion?.gazeTarget, motion?.attention ?? 0), body);
     const diagnostics = scoreTorso(torso, geometry, null, body, options.overhangDeg ?? 40);
     const pose = {
       torso,
@@ -571,6 +737,7 @@
       },
       diagnostics: {
         maxReachViolation: diagnostics.maxReachViolation,
+        maxFootHeightViolation: diagnostics.maxFootHeightViolation,
         torsoCorrection: Math.hypot(torso.x - requestedTorso.x, torso.y - requestedTorso.y,
           (torso.space?.depth || 0) - (options.space?.depth || 0)),
         maxAngleViolationDeg: diagnostics.maxAngleViolation,
@@ -597,28 +764,21 @@
     const leftShoulder = rootFor('leftHand', torso, body), rightShoulder = rootFor('rightHand', torso, body);
     setPoint('leftShoulder', leftShoulder);
     setPoint('rightShoulder', rightShoulder);
-    pose.points.neck = { x: (leftShoulder.x + rightShoulder.x) / 2, y: (leftShoulder.y + rightShoulder.y) / 2 };
-    const gaze = motion?.gazeTarget;
-    const headTilt = gaze ? Math.max(-0.32, Math.min(0.32,
-      Math.atan2(gaze.x - pose.points.neck.x, Math.max(12, gaze.y - pose.points.neck.y)))) * motion.attention : 0;
-    const headOffset = body.headRadius * 1.65;
-    const headProjection = headOffset * Math.cos(torso.space?.pitch || 0);
-    pose.points.head = {
-      x: pose.points.neck.x - Math.sin(torso.theta - headTilt) * headProjection,
-      y: pose.points.neck.y + Math.cos(torso.theta - headTilt) * headProjection,
-    };
-    if (pose.depth) {
-      pose.depth.neck = (leftShoulder.z + rightShoulder.z) / 2;
-      pose.depth.head = pose.depth.neck + headOffset * Math.sin(torso.space.pitch);
-    }
+    const {neck,head,tilt}=bodyHead(torso,body,motion);
+    setPoint('neck',neck);
+    setPoint('head',head);
     setPoint('leftHip', rootFor('leftFoot', torso, body));
     setPoint('rightHip', rootFor('rightFoot', torso, body));
+    const pelvisRight=unit(vector(rootFor('leftFoot',torso,body),rootFor('rightFoot',torso,body)));
+    const trunkUp=unit(vector({...pose.points.pelvis,z:pose.depth?.pelvis},neck));
+    const hipFrame={down:trunkUp.map(x=>-x),right:pelvisRight,forward:unit(cross(trunkUp,pelvisRight))};
     let maxSegmentResidual = 0;
     for (const limb of Object.keys(LIMBS)) {
       const id = contacts[limb];
       if (id == null) { pose.points[limb] = rootFor(limb, torso, body); continue; }
-      const endpoint = lookup(placements, id);
-      const root = rootFor(limb, torso, body), [a, b] = lengths(limb, body);
+      const point=lookup(placements,id);
+      const endpoint=options.space?contactAnchor(limb,point):point;
+      const root = rootFor(limb, torso, body), [a, b] = lengths(limb, body, endpoint, motion);
       const boneEndpoint = limbTarget(limb, endpoint, torso, body);
       const bendSide = LIMBS[limb].kind === 'arm' ? -LIMBS[limb].side : LIMBS[limb].side;
       const jointKey = limb.replace('Hand', 'Elbow').replace('Foot', 'Knee');
@@ -627,7 +787,10 @@
       const outward = torso.space
         ? kind === 'arm' ? 0.58 - side * torso.space.chestYaw * 0.22 : 0.91 - side * torso.space.hipYaw * 0.35
         : 0;
-      const knee = torso.space && kind === 'leg' ? { side, yaw: torso.space.hipYaw } : null;
+      const knee = torso.space && kind === 'leg'
+        ? {side,yaw:torso.space.hipYaw,frame:hipFrame,shoeAxis:vector(shoeAt(endpoint,torso,body,side).heel,endpoint),
+          upY:Math.cos((options.overhangDeg??40)*RAD),upZ:Math.sin((options.overhangDeg??40)*RAD),offset:options.kneeOffsets?.[limb]}
+        : null;
       const primary = twoBone(root, boneEndpoint, a, b, bendSide, outward, knee);
       const candidates = [primary, knee ? primary : twoBone(root, boneEndpoint, a, b, -bendSide, outward)];
       const jointScore = (joint, index) => {
@@ -639,6 +802,10 @@
       const chosenIndex = locked === bendSide ? 0 : locked === -bendSide ? 1
         : jointScore(candidates[0], 0) <= jointScore(candidates[1], 1) ? 0 : 1;
       const joint = candidates[chosenIndex];
+      if(knee) {
+        pose.kneeOffsets??={};
+        pose.kneeOffsets[limb]=joint.bendOffset;
+      }
       pose.bendDirections ||= {};
       pose.bendDirections[limb] = chosenIndex === 0 ? bendSide : -bendSide;
       const upperResidual = Math.abs(distance(root, joint) - a);
@@ -646,12 +813,23 @@
       maxSegmentResidual = Math.max(maxSegmentResidual, upperResidual, lowerResidual);
       setPoint(limb, endpoint);
       if (endpoint.profile) pose.points[limb].profile = endpoint.profile;
+      if(endpoint.gripPatch) {
+        pose.gripPatches??={};
+        pose.gripPatches[limb]=endpoint.gripPatch;
+      }
       setPoint(jointKey, joint);
     }
     pose.diagnostics.maxSegmentResidual = maxSegmentResidual;
-    pose.diagnostics.kinematic = pose.diagnostics.kinematic && maxSegmentResidual < 0.1;
+    extremities(pose, body, motion, options.jointsOnly);
+    const joints=articulation(pose,tilt,options.overhangDeg??40);
+    pose.diagnostics.jointAnglesDeg=joints.angles;
+    pose.diagnostics.jointViolationsDeg=joints.outside;
+    pose.diagnostics.articulationCost=joints.comfort;
+    pose.diagnostics.footClearance=joints.footClearance;
+    pose.diagnostics.maxAngleViolationDeg=joints.maxViolation;
+    pose.diagnostics.kinematic = pose.diagnostics.reachable && maxSegmentResidual < 0.1
+      && joints.maxViolation<.1 && joints.footClearance>=FOOT_BELOW_HEAD-.001;
     if (pose.depth) pose.diagnostics.centerOfMass = spatialCenterOfMass(pose.points, pose.depth);
-    if (!options.jointsOnly) extremities(pose, body, motion);
     if (motion) pose.motion = motion;
     return pose;
   }
@@ -664,5 +842,5 @@
     }
     return out;
   }
-  return { DEFAULT_BODY, LIMBS, solve, poseAt, interpolate, lookup, segmentViolation, convexHull, outsideHullDistance, directionPenalty, supportForces };
+  return { DEFAULT_BODY, LIMBS, JOINT_LIMITS, FOOT_BELOW_HEAD, solve, poseAt, interpolate, lookup, contactAnchor, segmentViolation, convexHull, outsideHullDistance, directionPenalty, supportForces, usableBalance, forceRanges };
 });

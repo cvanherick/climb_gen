@@ -10,6 +10,8 @@
   const holdMap = new Map();
   const holdGeometry = window.CLIMBGEN_HOLD_GEOMETRY;
   let spatialView;
+  let lastLoadReportAt=-Infinity;
+  const loadRows=new Map();
   let analysisView, activeView = 'home';
   let holdProfileRevision = 0;
   let dataset, routeGenerator, generatedCount = 0, betaFrame = 0, betaPaused = false, betaPlaybackIndex = 0, betaResult = null, betaAlternatives = [], activeBetaIndex = 0, currentPose = null, generating = false, currentProblem = null;
@@ -64,15 +66,57 @@
       });
     }
   }
+  function drawLoadPanel(figure,balance,forceVisible) {
+    const panel=$('board-3d-force-panel');
+    panel.hidden=!forceVisible;
+    if(!forceVisible){lastLoadReportAt=-Infinity;return;}
+    const legend=$('board-3d-force-legend');
+    legend.hidden=!balance;
+    const now=performance.now();
+    if(!betaPaused && now-lastLoadReportAt<120)return;
+    lastLoadReportAt=now;
+    const estimate=balance?ClimbGenIK.forceRanges(figure,balance):null;
+    const status=$('hold-load-status');
+    status.textContent=estimate ? (figure.motion?.airborne?'Static estimate during limb movement':'Estimated static load') :
+      figure?'No reliable load estimate for this frame.':'Reveal beta to see load estimates.';
+    const rows=$('hold-load-rows');
+    const activeRows=estimate?.rows??[];
+    for(const [limb,entry] of loadRows) entry.row.hidden=!activeRows.some(load=>load.limb===limb);
+    if(!estimate)return;
+    const labels={leftHand:'Left hand',rightHand:'Right hand',leftFoot:'Left foot',rightFoot:'Right foot'};
+    for(const {limb,percent,min,max} of activeRows) {
+      if(!loadRows.has(limb)) {
+        const row=document.createElement('div');
+        const term=document.createElement('dt');
+        const label=document.createElement('button');
+        label.type='button';
+        label.title='Focus the 3D camera on this contact';
+        label.addEventListener('click',()=>{
+          if(!currentPose?.points[limb])return;
+          if(!betaPaused)$('playback-toggle').click();
+          spatialView.focus({...currentPose.points[limb],z:currentPose.depth?.[limb]});
+        });
+        const value=document.createElement('dd');
+        term.append(label);row.append(term,value);rows.append(row);
+        loadRows.set(limb,{row,label,value});
+      }
+      const {row,label,value}=loadRows.get(limb);
+      row.hidden=false;
+      const id=figure.contactIds?.[limb];
+      label.textContent=labels[limb]+(id==null?'':' · #'+id);
+      const low=Math.floor(min),high=Math.ceil(max);
+      value.textContent=estimate.scenarios<2 || low===high ? '≈'+Math.round(percent)+'%' : low+'–'+high+'%';
+    }
+  }
   function drawBoard(route = null, activeStep = -1, figure = null) {
     const step = route?.betaSteps?.[activeStep];
     if (!$('board-3d-canvas').hidden) {
-      const forces = figure && $('board-3d-forces').checked ? ClimbGenIK.supportForces(figure) : null;
-      spatialView.update(route, step?.id, figure, forces);
-      const legend = $('board-3d-force-legend');
-      legend.hidden = !forces;
-      if (forces) $('board-3d-force-solution').textContent = forces.forceResidual > 0.16 || forces.torqueResidual > 4
-        ? ' · Static balance incomplete' : '';
+      const show=$('board-3d-forces').checked;
+      const forces=figure?.depth && show ? ClimbGenIK.supportForces(figure) : null;
+      const display=forces ? {...forces,beta:true,onHold:true,
+        contacts:ClimbGenIK.usableBalance(forces)?forces.contacts:[]} : null;
+      spatialView.update(route, step?.id, figure, display);
+      drawLoadPanel(figure,forces,show);
       return;
     }
     updateRouteRings(route, Boolean($('hold-vectors')?.checked));
@@ -111,6 +155,7 @@
   }
   $('board-3d-toggle').addEventListener('click', () => setBoardView($('board-3d-canvas').hidden));
   $('board-3d-forces').addEventListener('change', () => {
+    lastLoadReportAt=-Infinity;
     const activeStep = currentPose && betaClock.elapsed < betaTimeline?.duration ? betaPlaybackIndex : -1;
     drawBoard(currentProblem, activeStep, currentPose);
   });
@@ -333,6 +378,7 @@
     if (!seeking) playbackPosition.value = Math.round(elapsed / (betaTimeline.duration || 1) * 1000);
     if (frame.done) {
       betaPaused = true;
+      if(!$('board-3d-canvas').hidden && $('board-3d-forces').checked) drawBoard(currentProblem,-1,frame.pose);
       betaClock.pause();
       $('playback-toggle').textContent = 'Replay';
       $('beta-status').textContent = 'Finish matched';
@@ -382,6 +428,7 @@
       betaClock.pause();
       cancelAnimationFrame(betaFrame);
       $('playback-toggle').textContent = 'Play';
+      if(currentPose)drawBoard(currentProblem,betaPlaybackIndex,currentPose);
     }
   });
   $('playback-replay').addEventListener('click', () => playBeta(0));

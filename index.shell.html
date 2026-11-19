@@ -59,11 +59,16 @@
                 <button class="view-button" type="button" data-camera="reset">Reset</button>
                 <button class="view-button" type="button" data-camera="closer" aria-label="Zoom in">+</button>
                 <button class="view-button" type="button" data-camera="farther" aria-label="Zoom out">−</button>
+                <label class="board-3d-force-toggle"><input id="board-3d-forces" type="checkbox" /> Show hold loads</label>
               </div>
-              <p id="board-3d-help">Drag or use arrow keys to orbit. Shift + drag to pan. Scroll or pinch to zoom.</p>
-              <p>Hold depths are estimated.</p>
-              <label class="board-3d-force-toggle"><input id="board-3d-forces" type="checkbox" /> Show forces</label>
-              <p id="board-3d-force-legend" hidden><span>Gravity</span> <span>Hold reactions</span> · Estimated in body-weight units<b id="board-3d-force-solution"></b></p>
+              <p id="board-3d-help">Drag to orbit · Shift + drag to pan · Scroll or pinch to zoom</p>
+              <section id="board-3d-force-panel" class="hold-loads" aria-labelledby="hold-load-title" hidden>
+                <header><h3 id="hold-load-title">Hold loads</h3><span>% of body weight</span></header>
+                <p id="hold-load-status">Reveal beta to see load estimates.</p>
+                <dl id="hold-load-rows" class="hold-load-rows"></dl>
+                <p id="board-3d-force-legend" class="hold-load-key" hidden><span>Hand pull</span><span>Foot push</span><span>Gravity</span></p>
+                <details><summary>How estimates work</summary><p>Dots show estimated contact patches. Arrows at the holds show the climber’s pull or push. Load ranges compare plausible static balances at this pose. Hold depth, grip and motion are modeled.</p></details>
+              </section>
             </div>
             <p id="board-3d-error" class="board-3d-error" role="status" hidden></p>
             <details class="hold-inspector">

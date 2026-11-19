@@ -79,6 +79,17 @@ test('planner reports impossible route instead of substituting candidate plan', 
   assert.equal(result.steps, undefined);
 });
 
+test('a foothold that requires placing the feet at head height cannot start beta',()=>{
+  const placements=new Map([
+    ['s',{x:-1,y:25}],['m',{x:10,y:53}],['f',{x:8,y:85}],['high',{x:2,y:110}],
+  ]);
+  const plan=Planner.plan({holds:[
+    {id:'s',role:5},{id:'m',role:6},{id:'f',role:7},{id:'high',role:8},
+  ]},placements);
+  assert.equal(plan.ok,false);
+  assert.match(plan.reason,/starting stance/);
+});
+
 test('on-demand generator produces fresh quality-checked variants beyond the bundled pool', () => {
   const { data, placements } = loadData();
   const generator = RouteGenerator.create(data, { salt: 'route-generator-regression' });

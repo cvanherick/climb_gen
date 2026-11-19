@@ -10,7 +10,8 @@
   const signed = (value, limit) => Math.max(-limit, Math.min(limit, value));
   const wave = (t, start, peak, end) => t < peak
     ? ease((t - start) / (peak - start)) : 1 - ease((t - peak) / (end - peak));
-  const trackedJoints = ['leftElbow', 'rightElbow', 'leftKnee', 'rightKnee', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot', 'pelvis'];
+  const trackedJoints = ['leftElbow', 'rightElbow', 'leftKnee', 'rightKnee', 'leftWrist', 'rightWrist',
+    'leftAnkle', 'rightAnkle', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot', 'pelvis', 'neck', 'head'];
   function jointTravel(a, b, key) {
     return Math.hypot(a.points[key].x - b.points[key].x, a.points[key].y - b.points[key].y, a.depth[key] - b.depth[key]);
   }
@@ -62,7 +63,8 @@
     // would need an explicitly planned straight-limb transition.
     const bends = { ...previous.bendDirections };
     for (const [index, step] of plan.steps.entries()) {
-      const from = IK.lookup(placements, contacts[step.limb]), to = IK.lookup(placements, step.id);
+      const from = IK.contactAnchor(step.limb,IK.lookup(placements,contacts[step.limb]));
+      const to = IK.contactAnchor(step.limb,IK.lookup(placements,step.id));
       const distance = Math.hypot(to.x - from.x, to.y - from.y);
       const bodyDistance = Math.hypot(step.pose.torso.x - previous.torso.x, step.pose.torso.y - previous.torso.y);
       const duration = Math.max(1250, Math.min(2800, 1000 + distance * 22 + bodyDistance * 15));
@@ -94,7 +96,7 @@
         for (let i = 0; i <= 24; i++) {
           if (cost + peakResidual * 1500 >= bestCost) return Infinity;
           const pose = framePose(segment, i / 24, true);
-          cost += pose.diagnostics.maxAngleViolationDeg ** 2 * 0.04 + pose.diagnostics.maxSegmentResidual ** 2 * 100
+          cost += pose.diagnostics.maxAngleViolationDeg ** 2 * 0.02 + pose.diagnostics.articulationCost * 1.2 + pose.diagnostics.maxSegmentResidual ** 2 * 100
             + pose.diagnostics.torsoCorrection ** 2 * 0.24;
           if (i % 6 === 0) {
             const forces = IK.supportForces(pose, overhangDeg);
@@ -122,12 +124,27 @@
       }
       segment.arc = bestArc;
       segment.strength = bestStrength;
+      // Key the knee bend plane separately from the contact path. Smooth
+      // the bend angle rather than the joint positions to preserve links.
+      const bendsAt = Array.from({length:65},(_,i)=>framePose(segment,i/64,true).kneeOffsets);
+      segment.kneeOffsets=bendsAt.map((entry,i)=>{
+        if(!i || i===64)return entry;
+        const first=Math.max(0,i-3),last=Math.min(64,i+3);
+        return Object.fromEntries(['leftFoot','rightFoot'].map(limb=>{
+          let total=0,weight=0;
+          for(let j=first;j<=last;j++) {
+            const w=4-Math.abs(j-i);
+            total+=bendsAt[j][limb]*w;weight+=w;
+          }
+          return [limb,total/weight];
+        }));
+      });
       let priorPose = framePose(segment, 0, true), requiredDuration = duration;
-      for (let i = 1; i <= 64; i++) {
-        const nextPose = framePose(segment, i / 64, true);
+      for (let i = 1; i <= 128; i++) {
+        const nextPose = framePose(segment, i / 128, true);
         for (const key of trackedJoints) {
           const speedLimit = key === 'pelvis' ? 42 : key.endsWith('Foot') || key.endsWith('Knee') ? 66 : 84;
-          requiredDuration = Math.max(requiredDuration, jointTravel(nextPose, priorPose, key) * 64000 / speedLimit);
+          requiredDuration = Math.max(requiredDuration, jointTravel(nextPose, priorPose, key) * 128000 / speedLimit);
         }
         priorPose = nextPose;
       }
@@ -173,6 +190,9 @@
         z: mix(segment.from.z || 0, segment.to.z || 0, reachT)
           + (segment.isHand ? 2.4 : 3.5 + 1.5 * segment.highStep) * segment.stride * clearance,
       } : t <= segment.release ? segment.from : segment.to;
+      if(airborne && segment.isHand && segment.from.gripPatch && segment.to.gripPatch) {
+        moving.gripPatch={...moving,width:mix(segment.from.gripPatch.width,segment.to.gripPatch.width,reachT)};
+      }
       frameMap.set('__moving_contact__', moving);
       const frameContacts = { ...segment.contacts, [segment.step.limb]: '__moving_contact__' };
       const motion = { movingLimb: segment.step.limb, supportFoot: segment.supportFoot, load, drive, airborne,
@@ -190,7 +210,15 @@
         swingSide: segment.isHand ? 0 : side,
         swing: clearance * segment.stride,
       };
-      return IK.poseAt(torso, frameContacts, frameMap, { bendDirections: bends, motion, jointsOnly, space, overhangDeg });
+      let kneeOffsets;
+      if(segment.kneeOffsets) {
+        const i=Math.min(63,Math.floor(t*64));
+        const a=segment.kneeOffsets[i],b=segment.kneeOffsets[i+1],fraction=t*64-i;
+        kneeOffsets={leftFoot:mix(a.leftFoot,b.leftFoot,fraction),rightFoot:mix(a.rightFoot,b.rightFoot,fraction)};
+      }
+      const pose=IK.poseAt(torso, frameContacts, frameMap, { bendDirections: bends, motion, jointsOnly, space, overhangDeg, kneeOffsets });
+      pose.contactIds=t<segment.catch?segment.contacts:segment.step.contacts;
+      return pose;
     }
     function sample(elapsed = 0) {
       const time = Math.max(0, Math.min(total, elapsed));
