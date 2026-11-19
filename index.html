@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=a86a7b48ea70" />
+    <link rel="stylesheet" href="./styles.css?v=85ea0ee488fe" />
   </head>
   <body>
     <div class="app-shell">
@@ -110,7 +110,8 @@
             <button id="analysis-run" class="generate-button" type="submit" disabled>Analyze climb</button>
             <button id="analysis-cancel" class="view-button" type="button" hidden>Cancel</button>
           </form>
-          <p class="analysis-hint">Your video stays in this browser. The pose model downloads when analysis starts.</p>
+          <p class="analysis-hint">Your video stays in this browser. To resume, open the original clip and then load its saved review.</p>
+          <label class="analysis-restore">Load saved review <input id="analysis-import" type="file" accept=".json,application/json" disabled /></label>
           <progress id="analysis-progress" max="1" value="0" hidden></progress>
           <p id="analysis-status" role="status">Choose a video recorded from a fixed camera.</p>
           <div id="analysis-workspace" hidden>
@@ -154,6 +155,12 @@
                 <span id="analysis-step-status" class="analysis-hint" role="status" hidden></span>
               </div>
               <input id="analysis-timebar" type="range" min="0" max="1" step=".001" value="0" aria-label="Video time" />
+              <div id="analysis-range-tools" class="analysis-actions" role="group" aria-label="Analysis range" hidden>
+                <button id="analysis-range-start" class="view-button" type="button">Set start here</button>
+                <button id="analysis-range-end" class="view-button" type="button">Set end here</button>
+                <button id="analysis-range-full" class="view-button" type="button">Use full clip</button>
+                <output id="analysis-range-label"></output>
+              </div>
               <div id="analysis-markers" class="analysis-markers" aria-label="Contact and coaching timeline"></div>
               <canvas id="analysis-force-trace" width="900" height="55" aria-label="Estimated force from 0 to 1.8 body weights, by contact and time" title="Estimated BW over time. Cyan and blue are hands. Pink and purple are feet. Gaps are unavailable estimates." hidden></canvas>
               <div class="analysis-actions">
@@ -173,6 +180,11 @@
                 <p id="analysis-angles" class="analysis-hint"></p>
                 <p id="analysis-balance" class="analysis-hint">Forces appear only when a static estimate is supported.</p>
                 <ul id="analysis-live-contacts" class="analysis-list"></ul>
+                <div id="analysis-review-tools" class="analysis-actions" role="group" aria-label="Review estimated contacts" hidden>
+                  <button id="analysis-review-prev" class="view-button" type="button">Previous uncertain</button>
+                  <button id="analysis-review-next" class="view-button" type="button">Next uncertain</button>
+                  <output id="analysis-review-count"></output>
+                </div>
                 <details>
                   <summary>Edit a contact</summary>
                   <form id="analysis-contact-form" class="analysis-controls">
@@ -204,11 +216,12 @@
     <script src="./hold_spectrum.js?v=59163f5eaf04"></script><script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=ef37ab0bd574"></script><script src="./route_generator.js?v=8a7d8f4a7a67"></script><script src="./ik.js?v=8385777aba58"></script><script src="./animation.js?v=ee49b68b634b"></script><script src="./board_3d.js?v=84ee91fca255"></script><script src="./planner.js?v=0dcb372f21ae"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
     <script src="./analysis/video_player.js?v=c27b3d8016c0"></script>
     <script src="./analysis/calibration.js?v=87257e00af90"></script>
-    <script src="./analysis/analysis_model.js?v=4eda963024d3"></script>
+    <script src="./analysis/analysis_model.js?v=0f1321f5d91d"></script>
+    <script src="./analysis/session.js?v=4d468f57fdcb"></script>
     <script src="./analysis/reconstruction.js?v=74c2accb40f3"></script>
     <script src="./analysis/feedback_engine.js?v=25bf80efe59a"></script>
-    <script src="./analysis/pose_tracker.js?v=2dca7873a508"></script>
-    <script src="./analysis/analysis_ui.js?v=92319a88191c"></script>
+    <script src="./analysis/pose_tracker.js?v=995862350e1c"></script>
+    <script src="./analysis/analysis_ui.js?v=82ca38b1e45d"></script>
     <script src="./app.js?v=3b3702bb2349"></script>
   </body>
 </html>

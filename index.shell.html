@@ -110,7 +110,8 @@
             <button id="analysis-run" class="generate-button" type="submit" disabled>Analyze climb</button>
             <button id="analysis-cancel" class="view-button" type="button" hidden>Cancel</button>
           </form>
-          <p class="analysis-hint">Your video stays in this browser. The pose model downloads when analysis starts.</p>
+          <p class="analysis-hint">Your video stays in this browser. To resume, open the original clip and then load its saved review.</p>
+          <label class="analysis-restore">Load saved review <input id="analysis-import" type="file" accept=".json,application/json" disabled /></label>
           <progress id="analysis-progress" max="1" value="0" hidden></progress>
           <p id="analysis-status" role="status">Choose a video recorded from a fixed camera.</p>
           <div id="analysis-workspace" hidden>
@@ -154,6 +155,12 @@
                 <span id="analysis-step-status" class="analysis-hint" role="status" hidden></span>
               </div>
               <input id="analysis-timebar" type="range" min="0" max="1" step=".001" value="0" aria-label="Video time" />
+              <div id="analysis-range-tools" class="analysis-actions" role="group" aria-label="Analysis range" hidden>
+                <button id="analysis-range-start" class="view-button" type="button">Set start here</button>
+                <button id="analysis-range-end" class="view-button" type="button">Set end here</button>
+                <button id="analysis-range-full" class="view-button" type="button">Use full clip</button>
+                <output id="analysis-range-label"></output>
+              </div>
               <div id="analysis-markers" class="analysis-markers" aria-label="Contact and coaching timeline"></div>
               <canvas id="analysis-force-trace" width="900" height="55" aria-label="Estimated force from 0 to 1.8 body weights, by contact and time" title="Estimated BW over time. Cyan and blue are hands. Pink and purple are feet. Gaps are unavailable estimates." hidden></canvas>
               <div class="analysis-actions">
@@ -173,6 +180,11 @@
                 <p id="analysis-angles" class="analysis-hint"></p>
                 <p id="analysis-balance" class="analysis-hint">Forces appear only when a static estimate is supported.</p>
                 <ul id="analysis-live-contacts" class="analysis-list"></ul>
+                <div id="analysis-review-tools" class="analysis-actions" role="group" aria-label="Review estimated contacts" hidden>
+                  <button id="analysis-review-prev" class="view-button" type="button">Previous uncertain</button>
+                  <button id="analysis-review-next" class="view-button" type="button">Next uncertain</button>
+                  <output id="analysis-review-count"></output>
+                </div>
                 <details>
                   <summary>Edit a contact</summary>
                   <form id="analysis-contact-form" class="analysis-controls">

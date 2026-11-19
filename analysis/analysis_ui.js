@@ -1,6 +1,7 @@
 /* Dashboard controller. All panels use the same selected media timestamp. */
 (function (root) {
   const M=root.ClimbGenAnalysisModel, V=root.ClimbGenVideo, R=root.ClimbGenReconstruction;
+  const Sessions=root.ClimbGenAnalysisSession;
   const wire='leftHand rightHand leftFoot rightFoot'.split(' ');
   const label={leftHand:'Left hand',rightHand:'Right hand',leftFoot:'Left foot',rightFoot:'Right foot'};
   const hand='#67e8f9', foot='#e7a5ff', gold='#ffc761';
@@ -12,6 +13,8 @@
     const holds=root.ClimbGenBoard3D.contactPlacements(holdMap,geometry);
     let session=null, url=null, controller=null, view3D, webglUnavailable=false, visible=false;
     let calibration=null, corners=[], draft=null, preview=null, metadata=null, resultsRevision=0, sampleTimes=[];
+    let rangeDraft=null, clipIdentity=null, restoring=false;
+    let reviewContacts=[], reviewing=null;
     let stepRequest=0, betaJob=null;
     let activeKey='', activeRoute=null, hoveredHold=null;
     const player=V.attach(video,render);
@@ -40,9 +43,20 @@
       betaJob?.abort();
     }
     function setBusy(value) {
-      $('run').disabled=value || !metadata;
+      $('run').disabled=value || restoring || !metadata;
       $('cancel').hidden=!value; $('progress').hidden=!value;
-      $('height').disabled=value; $('weight').disabled=value;
+      $('height').disabled=value || restoring; $('weight').disabled=value || restoring;
+      $('import').disabled=value || restoring || !metadata;
+      for(const key of ['range-start','range-end','range-full']) $(key).disabled=value || restoring;
+    }
+    function showRange() {
+      $('range-tools').hidden=!rangeDraft;
+      if(!rangeDraft)return;
+      $('range-label').textContent='Analyze '+rangeDraft.start.toFixed(2)+'–'+rangeDraft.end.toFixed(2)+' s';
+      const active=session?.range;
+      if(active && (rangeDraft.start!==active.start || rangeDraft.end!==active.end)) {
+        $('range-label').textContent+=' · Run analysis to apply';
+      }
     }
     function dimensions() {
       if (!metadata) return;
@@ -57,15 +71,18 @@
       const file=$('file').files[0];
       if (!file) return;
       controller?.abort(); controller=null;
+      restoring=false;
       betaJob?.abort();
       resultsRevision++;
       video.pause();
       if(url) URL.revokeObjectURL(url);
-      metadata=null; session=null; calibration=null; corners=[]; draft=null; preview=null; hoveredHold=null;
+      metadata=null; session=null; calibration=null; corners=[]; draft=null; preview=null; hoveredHold=null; rangeDraft=null;
+      clipIdentity=Sessions.fingerprint(file).catch(()=>null);
       sampleTimes=[]; $('export').disabled=true; $('beta').disabled=true;
       $('undo-contact').disabled=true;
+      $('review-tools').hidden=true;
       $('beta-result').textContent='';
-      setBusy(false); player.reset(); calibrationUI(); timeline(); feedback();
+      setBusy(false); player.reset(); calibrationUI(); timeline(); feedback(); showRange();
       $('workspace').hidden=true;
       setStatus('Opening video…');
       url=URL.createObjectURL(file);
@@ -77,30 +94,34 @@
         setStatus('Choose a video with a finite duration and an image track.');
         return;
       }
-      metadata={name:$('file').files[0]?.name,width:video.videoWidth,height:video.videoHeight,duration:video.duration};
+      const file=$('file').files[0];
+      metadata={name:file?.name,size:file?.size,width:video.videoWidth,height:video.videoHeight,duration:video.duration};
+      rangeDraft={start:0,end:video.duration};
       $('timebar').max=String(video.duration);
       $('workspace').hidden=false;
       setBusy(false); dimensions();
       $('edit-end').max=String(video.duration);
       setStatus('Video ready. You can mark the board now or after tracking.');
-      editDefaults(); player.refresh();
+      editDefaults(); showRange(); player.refresh();
     });
     video.addEventListener('loadeddata',()=>player.refresh());
     video.addEventListener('error',()=>setStatus('This browser could not open the video. Try an H.264 MP4 or a WebM file.'));
     $('form').addEventListener('submit',async event=>{
       event.preventDefault();
-      if (!metadata || controller) return;
+      if (!metadata || controller || restoring) return;
       const analysis=new AbortController();
       controller=analysis;
       const source = document.createElement('video');
       source.className='analysis-decoder';
       source.muted=true; source.playsInline=true; source.preload='auto';
       const clip={...metadata};
+      const bounds={...rangeDraft};
       const height=$('height').valueAsNumber, weight=$('weight').valueAsNumber;
       setBusy(true); video.pause(); $('progress').value=0;
       setStatus('Loading the local pose tracker…');
       document.body.append(source);
       try {
+        // Start loading the decoder before awaiting the clip fingerprint.
         await new Promise((resolve,reject)=>{
           const signal=analysis.signal;
           const done=()=>{ clearTimeout(timer); signal.removeEventListener('abort',abort); source.onloadeddata=source.onerror=null; };
@@ -111,31 +132,75 @@
           source.onloadeddata=()=>{done();resolve();}; source.onerror=fail;
           source.src=url;
         });
+        clip.fingerprint=await clipIdentity;
+        analysis.signal.throwIfAborted();
         let execution;
         const frames=await root.ClimbGenPoseTracker.analyze(source,analysis.signal,(count,fraction,backend)=>{
           if (controller!==analysis) return;
           execution=backend;
           $('progress').value=fraction;
           if(count===1 || count%6===0) setStatus('Tracking pose · '+Math.round(fraction*100)+'%');
-        });
+        },bounds);
         analysis.signal.throwIfAborted();
         const smoothed=M.smooth(frames);
         if(!smoothed.some(f=>f.image)) throw new Error('No climber was detected. Try a brighter clip with the climber larger in frame.');
-        session={ schemaVersion:1, board:{layout:'TB2 Mirror',sizeInches:[144,144],angleDeg:40},
-          video:clip, climber:{heightCm:height,weightKg:Number.isFinite(weight)?weight:null},
+        session={ schemaVersion:1, board:Sessions.board,
+          video:clip, range:bounds, climber:{heightCm:height,weightKg:Number.isFinite(weight)?weight:null},
           sampling:{targetFps:12,tracker:'MediaPipe Pose Landmarker Lite',execution}, frames:smoothed,
           edits:session?.edits ?? [] };
         const coverage=smoothed.filter(f=>f.image).length/smoothed.length;
         session.poseCoverage=coverage;
         sampleTimes=frames.map(f=>f.t);
         session.motion=M.motion(smoothed,clip.width/clip.height);
-        rebuild();
+        rebuild(); showRange();
+        if(player.time<bounds.start || player.time>bounds.end) player.seek(bounds.start);
         setStatus('Analysis ready · '+Math.round(coverage*100)+'% of samples detected a pose.');
       } catch(error) {
         if(controller===analysis) setStatus(error.name==='AbortError'?'Analysis cancelled.':error.message || 'Pose detection failed.');
       } finally {
         source.removeAttribute('src'); source.load(); source.remove();
         if(controller===analysis) { controller=null; setBusy(false); }
+      }
+    });
+    for(const [button,edge] of [['range-start','start'],['range-end','end'],['range-full',null]]) {
+      $(button).addEventListener('click',()=>{
+        if(!metadata || controller || restoring)return;
+        video.pause();
+        const next=edge ? {...rangeDraft,[edge]:player.time} : {start:0,end:metadata.duration};
+        try { rangeDraft=Sessions.range(next.start,next.end,metadata.duration); showRange(); }
+        catch(error) { setStatus(error.message); }
+      });
+    }
+    $('import').addEventListener('change',async()=>{
+      const file=$('import').files[0], clip=metadata;
+      $('import').value='';
+      if(!file || !clip || controller || restoring)return;
+      if(file.size>128*1024*1024) {setStatus('This review exceeds 128 MB. Save a shorter analysis segment.');return;}
+      restoring=true;
+      setBusy(false);
+      setStatus('Opening saved review…');
+      try {
+        const [json,fingerprint]=await Promise.all([file.text(),clipIdentity]);
+        if(metadata!==clip)return;
+        const result=Sessions.restore(JSON.parse(json),{...clip,fingerprint},holds);
+        const restoredCalibration=result.corners ?
+          root.ClimbGenCalibration.calibrate(result.corners,clip.width/clip.height):null;
+        video.pause();
+        player.cancelStep();
+        session=result.session;
+        calibration=restoredCalibration; corners=result.corners??[]; draft=null;preview=null;hoveredHold=null;
+        rangeDraft={...session.range};
+        $('height').value=String(session.climber.heightCm);
+        $('weight').value=session.climber.weightKg??'';
+        $('show-holds').checked=Boolean(calibration);
+        sampleTimes=session.frames.map(f=>f.t);
+        session.motion=M.motion(session.frames,clip.width/clip.height);
+        calibrationUI(); rebuild(); showRange(); player.seek(result.resumeTime);
+        setStatus('Saved review reopened from cached pose samples.');
+      } catch(error) {
+        if(metadata===clip) setStatus(error instanceof SyntaxError?'Choose a valid ClimbGen review JSON.':error.message);
+      } finally {
+        if(metadata===clip){restoring=false;setBusy(false);}
       }
     });
     for(const key of ['height','weight']) $(key).addEventListener('change',()=>{
@@ -286,14 +351,23 @@
       if (!session) return;
       betaJob?.abort();
       const frames=session.frames;
+      const {start,end}=session.range;
       session.calibration=calibration ? {corners,estimatedFocalLength:calibration.focalKnown} : null;
-      let contacts=M.detectContacts(frames,calibration,holds,geometry,metadata.duration);
-      if(calibration) for(const edit of session.edits) contacts=M.editContacts(contacts,edit);
+      let contacts=M.detectContacts(frames,calibration,holds,geometry,end);
+      if(calibration) for(const edit of session.edits) {
+        const clipped={...edit,start:Math.max(start,edit.start),end:Math.min(end,edit.end)};
+        if(clipped.end>clipped.start) contacts=M.editContacts(contacts,clipped);
+      }
       session.contacts=contacts;
       session.stances=M.contactStances(contacts,metadata.duration);
       session.reconstruction=calibration ? R.build(frames,session.motion,calibration,contacts,holds,session.climber.heightCm) : [];
       session.events=root.ClimbGenFeedback.analyze(frames,session.motion,contacts,!!calibration,metadata.width/metadata.height)
-        .map(e=>({...e,end:Math.min(e.end,metadata.duration)}));
+        .map(e=>({...e,start:Math.max(e.start,start),end:Math.min(e.end,end)}))
+        .filter(e=>e.end>e.start);
+      reviewContacts=M.contactsToReview(contacts);
+      reviewing=null;
+      $('review-tools').hidden=!reviewContacts.length;
+      $('review-count').textContent=reviewContacts.length+' uncertain '+(reviewContacts.length===1?'contact':'contacts');
       resultsRevision++;
       $('export').disabled=false; $('beta').disabled=contacts.length<3;
       $('undo-contact').disabled=!session.edits.length;
@@ -305,9 +379,10 @@
       const t=player.time;
       c??=session?.contacts?.find(c=>c.limb===$('edit-limb').value && c.start<=t && t<c.end);
       if(c) $('edit-limb').value=c.limb;
-      const from=c?.start??Math.min(t,Math.max(0,metadata.duration-.25));
+      const bounds=session?.range??{start:0,end:metadata.duration};
+      const from=c?.start??M.clamp(t,bounds.start,Math.max(bounds.start,bounds.end-.25));
       $('edit-start').value=from.toFixed(3);
-      $('edit-end').value=Math.min(metadata.duration,c?.end??from+.6).toFixed(3);
+      $('edit-end').value=Math.min(bounds.end,c?.end??from+.6).toFixed(3);
       $('edit-hold').value=c?.id??'';
     }
     $('edit-limb').addEventListener('change',()=>editDefaults());
@@ -318,12 +393,30 @@
         end:Math.min(metadata.duration,$('edit-end').valueAsNumber)};
       try {
         if(edit.id && !holds.has(edit.id)) throw new Error('Select a hold from this board.');
+        if(edit.start<session.range.start-.0005 || edit.end>session.range.end+.0005) {
+          throw new Error('Keep the correction within the analyzed range.');
+        }
+        edit.start=Math.max(edit.start,session.range.start);
+        edit.end=Math.min(edit.end,session.range.end);
         M.editContacts(session.contacts,edit);
         session.edits.push(edit);
         rebuild(); player.seek(edit.start);
         setStatus('Contact correction applied.');
       } catch(error) { setStatus(error.message); }
     });
+    for(const [button,direction] of [['review-prev',-1],['review-next',1]]) {
+      $(button).addEventListener('click',()=>{
+        if(!reviewContacts.length)return;
+        let index=reviewing==null ? V.lowerBound(reviewContacts,player.time,c=>c.start) : reviewing;
+        if(direction<0 || reviewing!=null) index+=direction;
+        reviewing=(index+reviewContacts.length)%reviewContacts.length;
+        const contact=reviewContacts[reviewing];
+        $('review-count').textContent=(reviewing+1)+' of '+reviewContacts.length+' · '+label[contact.limb]+' #'+contact.id;
+        $('contact-form').closest('details').open=true;
+        player.seek(contact.start+Math.min(.045,(contact.end-contact.start)/2));
+        editDefaults(contact);
+      });
+    }
     $('undo-contact').addEventListener('click',()=>{
       if(!session?.edits.length)return;
       session.edits.pop();
@@ -332,7 +425,8 @@
     });
     $('export').addEventListener('click',()=>{
       if (!session) return;
-      const href=URL.createObjectURL(new Blob([JSON.stringify(session)],{type:'application/json'}));
+      const payload={...session,reviewTime:player.time};
+      const href=URL.createObjectURL(new Blob([JSON.stringify(payload)],{type:'application/json'}));
       const a=document.createElement('a'); a.href=href; a.download='climbgen-analysis-v1.json'; a.click();
       setTimeout(()=>URL.revokeObjectURL(href),1000);
     });
@@ -574,10 +668,12 @@
       if(!metadata || !visible)return;
       const t=Math.max(0,Math.min(metadata.duration,timing));
       $('timebar').value=String(t);
-      const frame=M.sample(session?.frames??[],t);
+      const bounds=session?.range;
+      const outside=Boolean(bounds && (t<bounds.start-.001 || t>bounds.end+.001));
+      const frame=outside ? null : M.sample(session?.frames??[],t);
       const sampleIndex=session ? V.lowerBound(session.frames,t,f=>f.t) : 0;
       const movement=M.motionAt(session?.motion??[],frame,t,metadata.width/metadata.height);
-      const active=M.contactAt(session?.contacts??[],t===metadata.duration ? t-.0001:t);
+      const active=outside ? [] : M.contactAt(session?.contacts??[],t===bounds?.end ? t-.0001:t);
       const sample=viewSample(t,active);
       const fit=frame?.image?sample.pose:null;
       const pose=fit?.quality>=.3 && fit.boneError<=4.5 ? fit:null;
@@ -586,7 +682,7 @@
         forces={status:'No static estimate between these frames'};
       }
       const status=frame?.image ? ' · '+(frame.kind==='observed'?'Tracked sample '+(sampleIndex+1):frame.kind==='interpolated'?'Interpolated pose':'Nearest sample') :
-        session ? ' · No tracked pose' : '';
+        outside ? ' · Outside analyzed range' : session ? ' · No tracked pose' : '';
       $('time').textContent=t.toFixed(3)+' / '+metadata.duration.toFixed(3)+' s'+status;
       $('time').title=meta.presented?'Decoded frame timestamp':'Video seek time';
       const stepStatus=$('step-status');

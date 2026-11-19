@@ -7,6 +7,7 @@
     leftHip:23,rightHip:24,leftKnee:25,rightKnee:26,leftAnkle:27,rightAnkle:28,leftHeel:29,rightHeel:30,
     leftFoot:31,rightFoot:32,
   };
+  const poseKeys = [...Object.keys(joints),'leftHand','rightHand','pelvis','neck'];
   const links = Object.keys(joints).filter(key => key.endsWith('Shoulder')).flatMap(shoulder => {
     const side = shoulder.slice(0,-8);
     return [['Shoulder','Elbow'],['Elbow','Wrist'],['Wrist','Hand'],['Shoulder','Hip'],
@@ -208,6 +209,9 @@
   function contactAt(intervals,t) {
     return intervals.filter(c=>c.start<=t && t<c.end);
   }
+  function contactsToReview(intervals) {
+    return intervals.filter(c=>c.source==='automatic' && c.confidence<.65);
+  }
   function contactStances(intervals,duration) {
     const changes=new Map([[0,[]],[duration,[]]]);
     for(const c of intervals) for(const [time,start] of [[c.start,true],[c.end,false]]) {
@@ -228,7 +232,7 @@
     }
     return stances.map(({key,...stance})=>stance);
   }
-  const api={limbs,links,confidence,smooth,sample,centerOfMass,motion,motionAt,detectContacts,editContacts,contactAt,contactStances,clamp,lerp};
+  const api={limbs,poseKeys,links,confidence,smooth,sample,centerOfMass,motion,motionAt,detectContacts,editContacts,contactAt,contactsToReview,contactStances,clamp,lerp};
   root.ClimbGenAnalysisModel=api;
   if (typeof module==='object' && module.exports) module.exports=api;
 })(globalThis);

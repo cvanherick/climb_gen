@@ -44,7 +44,7 @@
     });
     return { start:() => call({ packageRoot, modelAssetPath }), read:(bitmap,t) => call({ bitmap,t },[bitmap]), close:() => worker.terminate() };
   }
-  async function analyze(video, signal, update) {
+  async function analyze(video, signal, update, bounds={start:0,end:video.duration}) {
     const frames = [];
     const worker = workerClient(signal);
     let currentWorker = worker, model;
@@ -54,7 +54,7 @@
     canvas.height = Math.round(video.videoHeight*scale);
     const ctx = canvas.getContext('2d');
     const step = 1/12;
-    const expected = Math.max(1,Math.ceil(video.duration/step));
+    const expected = Math.max(1,Math.ceil((bounds.end-bounds.start)/step));
     try {
       if (currentWorker) {
         try { await currentWorker.start(); }
@@ -62,8 +62,11 @@
       }
       for (let i=0; i<expected; i++) {
         signal.throwIfAborted();
-        const decoded = await root.ClimbGenVideo.seekDecoded(video, Math.min(i*step,video.duration-.001),signal);
-        const t = Math.max(0,decoded.time);
+        const target=Math.min(bounds.start+i*step,Math.max(bounds.start,bounds.end-.001));
+        const decoded = await root.ClimbGenVideo.seekDecoded(video,target,signal);
+        // Seeking onto a frame whose presentation starts just before the
+        // selected range can display that frame at the first selected time.
+        const t = Math.min(bounds.end,Math.max(bounds.start,decoded.time));
         if (frames.length && t <= frames.at(-1).t+.0001) continue;
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
         let frame;

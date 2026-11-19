@@ -177,3 +177,44 @@ test('stepping without presented frame metadata reports use of a sample timestam
   await player.step(1,[.13,.25,.37]);
   assert.deepEqual(seen.at(-1),{t:.25,presented:false,sampled:true});
 });
+
+const Saved = require('../analysis/session');
+
+test('review files restore trusted inputs, including legacy full-clip exports',()=>{
+  const points=Object.fromEntries(Model.poseKeys.map(key=>[key,{x:.5,y:.5,z:0,confidence:.9}]));
+  const video={name:'climb.mp4',width:1080,height:1920,duration:12.5,size:60000,fingerprint:'clip-a'};
+  const holds=new Map([['304',{}]]);
+  const input={
+    schemaVersion:1, board:Saved.board, video, climber:{heightCm:183}, range:{start:4,end:8},
+    frames:[{t:4.04,image:points,world:null},{t:4.13,image:null,world:null}],
+    calibration:{corners:square}, edits:[{limb:'leftHand',id:'304',start:4,end:5}],
+    reconstruction:[{forces:{confidence:1}}], poseCoverage:1,reviewTime:5.5,
+  };
+  const result=Saved.restore(input,{...video,name:'renamed.mp4'},holds);
+  assert.deepEqual(result.session.range,{start:4,end:8});
+  assert.deepEqual(result.session.edits,input.edits);
+  assert.deepEqual(result.session.frames,input.frames);
+  assert.deepEqual(result.corners,square);
+  assert.equal(result.resumeTime,5.5);
+  assert.equal(result.session.reconstruction,undefined);
+  assert.equal(result.session.poseCoverage,.5);
+  assert.throws(()=>Saved.restore(input,{...video,fingerprint:'clip-b'},holds),/different video/);
+  assert.throws(()=>Saved.restore({...input,range:{start:5,end:8}},video,holds),/timestamps/);
+  assert.throws(()=>Saved.restore({...input,frames:input.frames.toReversed()},video,holds),/timestamps/);
+  assert.throws(()=>Saved.restore({...input,edits:[{...input.edits[0],id:'invalid'}]},video,holds),/correction/);
+  assert.throws(()=>Saved.restore({...input,frames:[{...input.frames[0],image:{}}]},video,holds),/landmarks/);
+  const legacy={...input,range:undefined,video:{name:video.name,width:video.width,height:video.height,duration:video.duration}};
+  assert.deepEqual(Saved.restore(legacy,video,holds).session.range,{start:0,end:video.duration});
+});
+
+test('analysis bounds reject reversed and tiny segments and accept short full clips',()=>{
+  assert.throws(()=>Saved.range(8,4,10),/range/);
+  assert.throws(()=>Saved.range(4,4.1,10),/range/);
+  assert.deepEqual(Saved.range(0,.14,.14),{start:0,end:.14});
+  assert.deepEqual(Saved.range(4.01,8.27,10),{start:4.01,end:8.27});
+});
+
+test('review navigation includes uncertain automatic contacts and excludes confirmed corrections',()=>{
+  const uncertain={limb:'leftHand',id:'30',confidence:.58,source:'automatic'};
+  assert.deepEqual(Model.contactsToReview([uncertain,{...uncertain,confidence:.9},{...uncertain,source:'manual'}]),[uncertain]);
+});
