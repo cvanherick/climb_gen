@@ -10,6 +10,7 @@
   const holdMap = new Map();
   const holdGeometry = window.CLIMBGEN_HOLD_GEOMETRY;
   let spatialView;
+  let analysisView, activeView = 'home';
   let holdProfileRevision = 0;
   let dataset, routeGenerator, generatedCount = 0, betaFrame = 0, betaPaused = false, betaPlaybackIndex = 0, betaResult = null, betaAlternatives = [], activeBetaIndex = 0, currentPose = null, generating = false, currentProblem = null;
 
@@ -815,6 +816,8 @@
   }
 
   function setActiveView(view) {
+    if (activeView === 'analysis' && view !== 'analysis') analysisView?.close();
+    activeView = view;
     if (view !== 'tb2' && betaResult && !betaPaused) {
       betaPaused = true;
       betaClock.pause();
@@ -824,15 +827,19 @@
     $('home-screen').hidden = view !== 'home';
     $('tb2-view').hidden = view !== 'tb2';
     $('photo-view').hidden = view !== 'photo';
+    $('analysis-view').hidden = view !== 'analysis';
     const context = $('context-tag');
     context.hidden = view === 'home';
-    context.textContent = view === 'tb2' ? 'TENSION BOARD 2 · 40° MIRROR' : 'PHOTO WALL · LOCAL';
+    context.textContent = {tb2:'TENSION BOARD 2 · 40° MIRROR', photo:'PHOTO WALL · LOCAL', analysis:'TB2 CLIMB ANALYSIS'}[view] || '';
     if (view === 'photo') $('photo-file').focus({ preventScroll: true });
+    if (view === 'analysis') analysisView?.open();
   }
 
   $('brand-home').addEventListener('click', (event) => { event.preventDefault(); setActiveView('home'); });
   $('home-tb2').addEventListener('click', () => setActiveView('tb2'));
   $('home-photo').addEventListener('click', () => setActiveView('photo'));
+  $('home-analysis').addEventListener('click', () => setActiveView('analysis'));
+  $('analysis-home').addEventListener('click', () => setActiveView('home'));
   initPhotoBuilder();
   $('tb2-home').addEventListener('click', () => setActiveView('home'));
   $('photo-home').addEventListener('click', () => setActiveView('home'));
@@ -855,5 +862,10 @@
     showLoadError();
     const detail = window.CLIMBGEN_LOAD_ERROR || error?.message;
     if (detail) $('route-copy').textContent += ` (${detail})`;
+  }
+  try {
+    analysisView = ClimbGenAnalysisUI.init(holdMap, holdGeometry);
+  } catch (error) {
+    $('analysis-status').textContent = 'Climb analysis could not initialize. ' + error.message;
   }
 })();

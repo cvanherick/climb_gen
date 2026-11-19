@@ -2,6 +2,7 @@ import json
 import hashlib
 import shutil
 from pathlib import Path
+from analysis_assets import ANALYSIS_SCRIPTS
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
@@ -12,6 +13,12 @@ DIST = ROOT / "dist"
 html = (ROOT / "index.shell.html").read_text()
 def cache_version(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+
+def analysis_version(name):
+    source = (ROOT / "analysis" / name).read_bytes()
+    if name == "pose_tracker.js":
+        source += (ROOT / "analysis" / "pose_worker.js").read_bytes()
+    return hashlib.sha256(source).hexdigest()[:12]
 
 data_path = ROOT / "data/tb2-mirror-40.js"
 route_evaluator_data_path = ROOT / "data/tb2-route-evaluator.js"
@@ -51,6 +58,10 @@ replacements = {
         f'<script src="./photo_suggestions.js?v={cache_version(photo_suggestions_path)}"></script>'
         f'<script src="./photo_hold_detector.js?v={cache_version(photo_hold_detector_path)}"></script>'
     ),
+    "<!-- INLINE_ANALYSIS -->": "\n    ".join(
+        f'<script src="./analysis/{name}?v={analysis_version(name)}"></script>'
+        for name in ANALYSIS_SCRIPTS
+    ),
     "<!-- INLINE_APP -->": f'<script src="./app.js?v={cache_version(app_path)}"></script>',
 }
 for marker, content in replacements.items():
@@ -80,3 +91,4 @@ shutil.copytree(ROOT / "docs/hold-references", DIST / "docs/hold-references")
 shutil.copy2(spectrum_path, DIST / "data/tb2-hold-spectrum.js")
 shutil.copy2(hold_geometry_path, DIST / "data" / hold_geometry_path.name)
 shutil.copy2(board_3d_path, DIST / board_3d_path.name)
+shutil.copytree(ROOT / "analysis", DIST / "analysis", ignore=shutil.ignore_patterns("*.md"))

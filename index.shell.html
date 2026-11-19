@@ -23,6 +23,7 @@
           <div class="home-options">
             <button id="home-tb2" class="home-choice" type="button"><span class="home-choice-detail">40° · Mirror</span><strong>Tension Board 2</strong><small>Generate a problem by grade and style, then watch the beta.</small><span class="home-choice-arrow" aria-hidden="true">↗</span></button>
             <button id="home-photo" class="home-choice photo" type="button"><strong>Upload a wall photo</strong><small>Detect holds, choose a start, and build a sequence.</small><span class="home-choice-arrow" aria-hidden="true">↗</span></button>
+            <button id="home-analysis" class="home-choice analysis-entry" type="button"><span class="home-choice-detail">40° · Mirror</span><strong>TB2 Climb Analysis</strong><small>Upload a climbing video to analyze your movement, estimated forces, center of mass, and technique.</small><span class="home-choice-arrow" aria-hidden="true">↗</span></button>
           </div>
         </section>
 
@@ -98,10 +99,106 @@
           </aside>
         </section>
         </section>
+        <section id="analysis-view" class="app-view" hidden aria-labelledby="analysis-title">
+          <button id="analysis-home" class="back-home" type="button">← All tools</button>
+          <h1 id="analysis-title">TB2 Climb Analysis</h1>
+          <form id="analysis-form" class="analysis-controls">
+            <label>Board <select aria-label="Board layout"><option>TB2 Mirror · 40° · 12 × 12</option></select></label>
+            <label>Climbing video <input id="analysis-file" type="file" accept=".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm" /></label>
+            <label>Height (cm) <input id="analysis-height" type="number" min="100" max="240" value="175" required /></label>
+            <label>Weight (kg, optional) <input id="analysis-weight" type="number" min="20" max="300" step=".1" /></label>
+            <button id="analysis-run" class="generate-button" type="submit" disabled>Analyze climb</button>
+            <button id="analysis-cancel" class="view-button" type="button" hidden>Cancel</button>
+          </form>
+          <p class="analysis-hint">Your video stays in this browser. The pose model downloads when analysis starts.</p>
+          <progress id="analysis-progress" max="1" value="0" hidden></progress>
+          <p id="analysis-status" role="status">Choose a video recorded from a fixed camera.</p>
+          <div id="analysis-workspace" hidden>
+            <div class="analysis-grid">
+              <section class="analysis-card">
+                <h2>Video</h2>
+                <div id="analysis-stage" class="analysis-stage">
+                  <video id="analysis-video" preload="metadata" playsinline aria-label="Uploaded climbing video"></video>
+                  <canvas id="analysis-overlay" aria-label="Video pose and hold overlay"></canvas>
+                </div>
+                <div class="analysis-actions">
+                  <button id="analysis-calibrate" class="view-button" type="button">Mark board corners</button>
+                  <button id="analysis-corner-undo" class="view-button" type="button" hidden>Undo corner</button>
+                  <button id="analysis-corner-cancel" class="view-button" type="button" hidden>Cancel marking</button>
+                  <button id="analysis-fullscreen" class="view-button" type="button">Fullscreen</button>
+                </div>
+                <p id="analysis-calibration-status" class="analysis-hint" role="status">Mark the corners of the full board face to identify contacts.</p>
+              </section>
+              <section class="analysis-card">
+                <h2>Estimated body in 3D</h2>
+                <canvas id="analysis-board" tabindex="0" aria-label="3D board and estimated climber"></canvas>
+                <canvas id="analysis-board-flat" aria-label="Board plane and active contacts" hidden></canvas>
+                <div class="analysis-actions" id="analysis-camera">
+                  <button class="view-button" type="button" data-camera="front">Front</button>
+                  <button class="view-button" type="button" data-camera="side">Side</button>
+                  <button class="view-button" type="button" data-camera="reset">Reset</button>
+                  <button id="analysis-flat-toggle" class="view-button" type="button" aria-pressed="false">2D board</button>
+                </div>
+                <p id="analysis-fit" class="analysis-hint">Mark board corners and analyze a climb to fit the climber.</p>
+              </section>
+            </div>
+            <section class="analysis-card">
+              <div class="analysis-actions">
+                <button id="analysis-play" class="view-button" type="button">Play</button>
+                <button id="analysis-prev" class="view-button" type="button" aria-label="Previous frame">‹ Frame</button>
+                <button id="analysis-next" class="view-button" type="button" aria-label="Next frame">Frame ›</button>
+                <label>Speed <select id="analysis-speed"><option value="1">1×</option><option value=".5">0.5×</option><option value=".25">0.25×</option><option value=".1">0.1×</option></select></label>
+                <output id="analysis-time">0.000 s</output>
+              </div>
+              <input id="analysis-timebar" type="range" min="0" max="1" step=".001" value="0" aria-label="Video time" />
+              <div id="analysis-markers" class="analysis-markers" aria-label="Contact and coaching timeline"></div>
+              <canvas id="analysis-force-trace" width="900" height="55" aria-label="Estimated force from 0 to 1.8 body weights, by contact and time" title="Estimated BW over time. Cyan and blue are hands. Pink and purple are feet. Gaps are unavailable estimates." hidden></canvas>
+              <div class="analysis-actions">
+                <label><input id="analysis-show-pose" type="checkbox" checked /> Skeleton</label>
+                <label><input id="analysis-show-com" type="checkbox" checked /> COM</label>
+                <label><input id="analysis-show-trail" type="checkbox" checked /> Trajectory</label>
+                <label><input id="analysis-show-motion" type="checkbox" /> Motion arrows</label>
+                <label><input id="analysis-show-holds" type="checkbox" /> Hold IDs</label>
+                <label><input id="analysis-show-forces" type="checkbox" checked /> Force arrows</label>
+                <label>Arrows show <select id="analysis-force-side"><option value="climber">Forces on climber</option><option value="hold">Forces on holds</option></select></label>
+              </div>
+            </section>
+            <div class="analysis-grid">
+              <section class="analysis-card">
+                <h2>At this frame</h2>
+                <p id="analysis-movement">No pose analysis yet.</p>
+                <p id="analysis-angles" class="analysis-hint"></p>
+                <p id="analysis-balance" class="analysis-hint">Forces appear only when a static estimate is supported.</p>
+                <ul id="analysis-live-contacts" class="analysis-list"></ul>
+                <details>
+                  <summary>Edit a contact</summary>
+                  <form id="analysis-contact-form" class="analysis-controls">
+                    <label>Limb <select id="analysis-edit-limb"><option value="leftHand">Left hand</option><option value="rightHand">Right hand</option><option value="leftFoot">Left foot</option><option value="rightFoot">Right foot</option></select></label>
+                    <label>Hold <select id="analysis-edit-hold"><option value="">No contact</option></select></label>
+                    <label>From (s) <input id="analysis-edit-start" type="number" min="0" step=".001" required /></label>
+                    <label>To (s) <input id="analysis-edit-end" type="number" min="0" step=".001" required /></label>
+                    <button id="analysis-save-contact" class="view-button" type="submit">Apply correction</button>
+                  </form>
+                  <p class="analysis-hint">Select a predicted contact to edit it, or click a projected hold to fill in its ID.</p>
+                </details>
+                <button id="analysis-export" class="view-button" type="button" disabled>Download analysis JSON</button>
+              </section>
+              <section class="analysis-card">
+                <h2>Technique review</h2>
+                <ol id="analysis-feedback" class="analysis-list"><li>Analyze a video to find moments to review.</li></ol>
+                <div class="analysis-actions">
+                  <button id="analysis-beta" class="view-button" type="button" disabled>Suggest alternative beta</button>
+                </div>
+                <p id="analysis-beta-result" class="analysis-hint"></p>
+              </section>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
     <!-- INLINE_DATA -->
     <!-- INLINE_MODELS -->
+    <!-- INLINE_ANALYSIS -->
     <!-- INLINE_APP -->
   </body>
 </html>

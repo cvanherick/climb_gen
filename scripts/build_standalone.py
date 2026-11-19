@@ -1,6 +1,7 @@
 import base64
 import json
 from pathlib import Path
+from analysis_assets import ANALYSIS_SCRIPTS
 
 ROOT = Path(__file__).resolve().parents[1]
 template = (ROOT / "index.shell.html").read_text()
@@ -29,6 +30,9 @@ replacements = {
     "<!-- INLINE_DATA -->": f"<script>\n{dataset}\n{spectrum}\n{profiles}\n{hold_geometry}\n{route_evaluator_data}\nwindow.CLIMBGEN_ASSETS = {json.dumps(image_data, separators=(',', ':'))};\n</script>",
     "<!-- INLINE_MODELS -->": f"<script>\n{spectrum_api}\n{hold_profiles}\n{route_evaluator}\n{route_generator}\n{models}\n{photo_suggestions}\n{photo_hold_detector}\n</script>",
     "<!-- INLINE_APP -->": f"<script>\n{app}\n</script>",
+    "<!-- INLINE_ANALYSIS -->": "<script>\n" + "\n".join(
+        (ROOT / "analysis" / name).read_text() for name in ANALYSIS_SCRIPTS
+    ) + "\n</script>",
 }
 for marker, content in replacements.items():
     if template.count(marker) != 1:
