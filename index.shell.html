@@ -123,8 +123,10 @@
                 </div>
                 <div class="analysis-actions">
                   <button id="analysis-calibrate" class="view-button" type="button">Mark board corners</button>
+                  <button id="analysis-corner-apply" class="view-button" type="button" hidden>Apply corners</button>
                   <button id="analysis-corner-undo" class="view-button" type="button" hidden>Undo corner</button>
                   <button id="analysis-corner-cancel" class="view-button" type="button" hidden>Cancel marking</button>
+                  <button id="analysis-corner-reset" class="view-button" type="button" hidden>Clear alignment</button>
                   <button id="analysis-fullscreen" class="view-button" type="button">Fullscreen</button>
                 </div>
                 <p id="analysis-calibration-status" class="analysis-hint" role="status">Mark the corners of the full board face to identify contacts.</p>
@@ -149,6 +151,7 @@
                 <button id="analysis-next" class="view-button" type="button" aria-label="Next frame">Frame ›</button>
                 <label>Speed <select id="analysis-speed"><option value="1">1×</option><option value=".5">0.5×</option><option value=".25">0.25×</option><option value=".1">0.1×</option></select></label>
                 <output id="analysis-time">0.000 s</output>
+                <span id="analysis-step-status" class="analysis-hint" role="status" hidden></span>
               </div>
               <input id="analysis-timebar" type="range" min="0" max="1" step=".001" value="0" aria-label="Video time" />
               <div id="analysis-markers" class="analysis-markers" aria-label="Contact and coaching timeline"></div>
@@ -179,7 +182,8 @@
                     <label>To (s) <input id="analysis-edit-end" type="number" min="0" step=".001" required /></label>
                     <button id="analysis-save-contact" class="view-button" type="submit">Apply correction</button>
                   </form>
-                  <p class="analysis-hint">Select a predicted contact to edit it, or click a projected hold to fill in its ID.</p>
+                  <button id="analysis-undo-contact" class="view-button" type="button" disabled>Undo last correction</button>
+                  <p class="analysis-hint">Select a contact in the timeline or click a projected hold to fill in its ID.</p>
                 </details>
                 <button id="analysis-export" class="view-button" type="button" disabled>Download analysis JSON</button>
               </section>

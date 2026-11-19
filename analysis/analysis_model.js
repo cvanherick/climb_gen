@@ -35,10 +35,14 @@
       if (!frame.image) return frame;
       const output = { t:frame.t };
       for (const space of ['image','world']) {
-        output[space] = frame[space] && Object.fromEntries(Object.entries(frame[space]).map(([key,p])=>{
+        if (!frame[space]) {output[space]=null;continue;}
+        let first=i,last=i;
+        while(first>Math.max(0,i-2) && converted[first-1][space] && frame.t-converted[first-1].t<=.18) first--;
+        while(last<Math.min(converted.length-1,i+2) && converted[last+1][space] && converted[last+1].t-frame.t<=.18) last++;
+        output[space] = Object.fromEntries(Object.entries(frame[space]).map(([key,p])=>{
           const total = {x:0,y:0,z:0};
           let sum=0;
-          for (let j=Math.max(0,i-2);j<=Math.min(converted.length-1,i+2);j++) {
+          for (let j=first;j<=last;j++) {
             const other=converted[j][space]?.[key], dt=Math.abs(converted[j].t-frame.t);
             if (!other || dt>.18) continue;
             const weight=Math.exp(-.5*(dt/.072)**2)*Math.max(.02,confidence(other));
@@ -98,9 +102,14 @@
     const entries=frames.map(f=>({ t:f.t, center:centerOfMass(f.image), pelvis:f.image?.pelvis ?? null,
       angles:f.world ? angles(f.world) : null }));
     const derivative=(i,key,radius)=> {
-      const a=entries[Math.max(0,i-radius)],b=entries[Math.min(entries.length-1,i+radius)];
+      if (!entries[i][key] || entries[i].center?.confidence<.55) return null;
+      let first=i,last=i;
+      const continuous=(a,b)=>entries[a][key] && entries[a].center?.confidence>=.55 && Math.abs(entries[a].t-entries[b].t)<=.21;
+      while(first>Math.max(0,i-radius) && continuous(first-1,first)) first--;
+      while(last<Math.min(entries.length-1,i+radius) && continuous(last+1,last)) last++;
+      const a=entries[first],b=entries[last];
       const dt=b.t-a.t;
-      if (!a[key] || !b[key] || !entries[i][key] || dt<.075 || dt>.66) return null;
+      if (dt<.075 || dt>.66 || (key==='velocity' && last-first<2)) return null;
       return { x:(b[key].x-a[key].x)/dt, y:(b[key].y-a[key].y)/dt };
     };
     for (let i=0;i<entries.length;i++) entries[i].velocity=derivative(i,'center',2);
@@ -110,6 +119,23 @@
       row.speed=row.velocity && Math.hypot(row.velocity.x*aspect,row.velocity.y);
     }
     return entries;
+  }
+  function motionAt(entries,frame,t,aspect=1) {
+    if (!frame?.image) return null;
+    const center=centerOfMass(frame.image);
+    if (!center) return null;
+    const index=lowerBound(entries,t,f=>f.t);
+    const a=entries[index-1],b=entries[index];
+    const exact=[a,b].find(row=>row && Math.abs(row.t-t)<.001);
+    const interpolate=(u,v)=>{
+      if (!u || !v || !a.center || !b.center || b.t-a.t>.21) return null;
+      const amount=(t-a.t)/(b.t-a.t);
+      return {x:lerp(u.x,v.x,amount),y:lerp(u.y,v.y,amount)};
+    };
+    const velocity=exact ? exact.velocity : interpolate(a?.velocity,b?.velocity);
+    const acceleration=exact ? exact.acceleration : interpolate(a?.acceleration,b?.acceleration);
+    return {center,velocity,acceleration,speed:velocity && Math.hypot(velocity.x*aspect,velocity.y),
+      angles:frame.world ? angles(frame.world) : null};
   }
   function detectContacts(frames,calibration,holds,geometry={},duration=frames.at(-1)?.t??0) {
     if (!calibration) return [];
@@ -202,7 +228,7 @@
     }
     return stances.map(({key,...stance})=>stance);
   }
-  const api={limbs,links,confidence,smooth,sample,centerOfMass,motion,detectContacts,editContacts,contactAt,contactStances,clamp,lerp};
+  const api={limbs,links,confidence,smooth,sample,centerOfMass,motion,motionAt,detectContacts,editContacts,contactAt,contactStances,clamp,lerp};
   root.ClimbGenAnalysisModel=api;
   if (typeof module==='object' && module.exports) module.exports=api;
 })(globalThis);

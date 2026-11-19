@@ -11,7 +11,8 @@
     const ctx=overlay.getContext('2d'), flatCtx=flat.getContext('2d');
     const holds=root.ClimbGenBoard3D.contactPlacements(holdMap,geometry);
     let session=null, url=null, controller=null, view3D, webglUnavailable=false, visible=false;
-    let calibration=null, corners=[], draft=null, metadata=null, resultsRevision=0, sampleTimes=[];
+    let calibration=null, corners=[], draft=null, preview=null, metadata=null, resultsRevision=0, sampleTimes=[];
+    let stepRequest=0, betaJob=null;
     let activeKey='', activeRoute=null, hoveredHold=null;
     const player=V.attach(video,render);
     const getHoldList=()=>[...holds.keys()].map(String).sort((a,b)=>Number(a)-Number(b));
@@ -32,7 +33,12 @@
       }
       player.refresh();
     }
-    function close() { visible=false; video.pause(); }
+    function close() {
+      visible=false;
+      video.pause();
+      player.cancelStep();
+      betaJob?.abort();
+    }
     function setBusy(value) {
       $('run').disabled=value || !metadata;
       $('cancel').hidden=!value; $('progress').hidden=!value;
@@ -51,10 +57,14 @@
       const file=$('file').files[0];
       if (!file) return;
       controller?.abort(); controller=null;
+      betaJob?.abort();
+      resultsRevision++;
       video.pause();
       if(url) URL.revokeObjectURL(url);
-      metadata=null; session=null; calibration=null; corners=[]; draft=null; hoveredHold=null;
+      metadata=null; session=null; calibration=null; corners=[]; draft=null; preview=null; hoveredHold=null;
       sampleTimes=[]; $('export').disabled=true; $('beta').disabled=true;
+      $('undo-contact').disabled=true;
+      $('beta-result').textContent='';
       setBusy(false); player.reset(); calibrationUI(); timeline(); feedback();
       $('workspace').hidden=true;
       setStatus('Opening video…');
@@ -113,7 +123,8 @@
         if(!smoothed.some(f=>f.image)) throw new Error('No climber was detected. Try a brighter clip with the climber larger in frame.');
         session={ schemaVersion:1, board:{layout:'TB2 Mirror',sizeInches:[144,144],angleDeg:40},
           video:clip, climber:{heightCm:height,weightKg:Number.isFinite(weight)?weight:null},
-          sampling:{targetFps:12,tracker:'MediaPipe Pose Landmarker Lite',execution}, frames:smoothed, edits:[] };
+          sampling:{targetFps:12,tracker:'MediaPipe Pose Landmarker Lite',execution}, frames:smoothed,
+          edits:session?.edits ?? [] };
         const coverage=smoothed.filter(f=>f.image).length/smoothed.length;
         session.poseCoverage=coverage;
         sampleTimes=frames.map(f=>f.t);
@@ -125,6 +136,17 @@
       } finally {
         source.removeAttribute('src'); source.load(); source.remove();
         if(controller===analysis) { controller=null; setBusy(false); }
+      }
+    });
+    for(const key of ['height','weight']) $(key).addEventListener('change',()=>{
+      if(!session || !$(key).validity.valid) return;
+      if(key==='height') {
+        session.climber.heightCm=$('height').valueAsNumber;
+        rebuild();
+        setStatus('Climber height applied to the cached 3D fit.');
+      } else {
+        session.climber.weightKg=Number.isFinite($('weight').valueAsNumber) ? $('weight').valueAsNumber : null;
+        setStatus('Climber weight updated for the analysis export.');
       }
     });
     $('cancel').addEventListener('click',()=>controller?.abort());
@@ -144,8 +166,18 @@
     });
     $('timebar').addEventListener('input',()=>player.seek($('timebar').valueAsNumber));
     for (const [id,direction] of [['prev',-1],['next',1]]) $(id).addEventListener('click',async()=>{
+      const request=++stepRequest;
+      const status=$('step-status');
+      status.hidden=false;status.textContent='Finding frame…';
+      $('prev').disabled=$('next').disabled=true;
       try { await player.step(direction,sampleTimes); }
       catch(error) { if(error.name!=='AbortError') setStatus('Could not step to that video frame.'); }
+      finally {
+        if(request===stepRequest) {
+          $('prev').disabled=$('next').disabled=false;
+          if(status.textContent==='Finding frame…') status.hidden=true;
+        }
+      }
     });
     $('fullscreen').addEventListener('click',async()=>{
       try {
@@ -169,16 +201,43 @@
     });
     function calibrationUI() {
       const names=['upper left','upper right','lower right','lower left'];
-      $('calibration-status').textContent=draft?'Click the '+names[draft.length]+' corner of the full plywood face.':
+      $('calibration-status').textContent=draft?.length===4
+        ? preview ? 'Check the projected holds. Select a corner and click its new location, or apply the alignment.'
+          : 'Adjust the selected corner until the outline is clockwise and convex.'
+        : draft?'Click the '+names[draft.length]+' corner of the full plywood face.':
         calibration?'Board aligned. Turn on Hold IDs to check the projection.':'Mark the corners of the full board face to identify contacts.';
       $('calibrate').textContent=calibration?'Correct board corners':'Mark board corners';
+      $('calibrate').disabled=Boolean(draft);
+      $('corner-apply').hidden=!draft;
+      $('corner-apply').disabled=!preview;
       $('corner-undo').hidden=!draft; $('corner-undo').disabled=!draft?.length;
       $('corner-cancel').hidden=!draft;
+      $('corner-reset').hidden=!calibration || Boolean(draft);
       overlay.classList.toggle('marking',Boolean(draft));
     }
-    $('calibrate').addEventListener('click',()=>{video.pause(); draft=[]; calibrationUI(); player.refresh();});
-    $('corner-undo').addEventListener('click',()=>{draft?.pop();calibrationUI();player.refresh();});
-    $('corner-cancel').addEventListener('click',()=>{draft=null;calibrationUI();player.refresh();});
+    let selectedCorner=null;
+    function refreshDraft() {
+      preview=null;
+      try {
+        if(draft?.length===4) preview=root.ClimbGenCalibration.calibrate(draft,metadata.width/metadata.height);
+      } catch { /* Keep invalid candidates editable. */ }
+      calibrationUI();player.refresh();
+    }
+    $('calibrate').addEventListener('click',()=>{
+      video.pause();player.cancelStep();draft=corners.slice();selectedCorner=null;refreshDraft();
+    });
+    $('corner-undo').addEventListener('click',()=>{draft?.pop();selectedCorner=null;refreshDraft();});
+    $('corner-cancel').addEventListener('click',()=>{draft=null;selectedCorner=null;refreshDraft();});
+    $('corner-apply').addEventListener('click',()=>{
+      if(!preview)return;
+      calibration=preview;corners=draft;draft=null;selectedCorner=null;
+      $('show-holds').checked=true;
+      refreshDraft();rebuild();
+    });
+    $('corner-reset').addEventListener('click',()=>{
+      calibration=null;corners=[];hoveredHold=null;
+      calibrationUI();rebuild();player.refresh();
+    });
     function imagePoint(event) {
       const bounds=overlay.getBoundingClientRect();
       const scale=Math.min(bounds.width/metadata.width,bounds.height/metadata.height);
@@ -208,18 +267,16 @@
       const click=imagePoint(event);
       if(!click)return;
       if(draft){
-        draft.push(click);
-        if(draft.length===4){
-          try {
-            calibration=root.ClimbGenCalibration.calibrate(draft,metadata.width/metadata.height);
-            corners=draft; draft=null; $('show-holds').checked=true;
-            rebuild();
-          } catch(error) {
-            draft.pop();calibrationUI();$('calibration-status').textContent=error.message+' Try the lower left corner again or undo earlier points.';
-            player.refresh();return;
-          }
+        if(draft.length<4) draft.push(click);
+        else if(selectedCorner!=null) {draft[selectedCorner]=click;selectedCorner=null;}
+        else {
+          // Select the nearest handle in screen space, regardless of video aspect.
+          selectedCorner=draft.reduce((best,p,i)=>{
+            const d=Math.hypot((p.x-click.x)*overlay.width,(p.y-click.y)*overlay.height);
+            return d<best.d?{i,d}:best;
+          },{i:null,d:Infinity}).i;
         }
-        calibrationUI();player.refresh();
+        refreshDraft();
       } else if(calibration && $('show-holds').checked){
         const id=nearestHold(click);
         if(id) { $('contact-form').closest('details').open=true; editDefaults(); $('edit-hold').value=id; }
@@ -227,10 +284,11 @@
     });
     function rebuild() {
       if (!session) return;
+      betaJob?.abort();
       const frames=session.frames;
       session.calibration=calibration ? {corners,estimatedFocalLength:calibration.focalKnown} : null;
       let contacts=M.detectContacts(frames,calibration,holds,geometry,metadata.duration);
-      for(const edit of session.edits) contacts=M.editContacts(contacts,edit);
+      if(calibration) for(const edit of session.edits) contacts=M.editContacts(contacts,edit);
       session.contacts=contacts;
       session.stances=M.contactStances(contacts,metadata.duration);
       session.reconstruction=calibration ? R.build(frames,session.motion,calibration,contacts,holds,session.climber.heightCm) : [];
@@ -238,6 +296,7 @@
         .map(e=>({...e,end:Math.min(e.end,metadata.duration)}));
       resultsRevision++;
       $('export').disabled=false; $('beta').disabled=contacts.length<3;
+      $('undo-contact').disabled=!session.edits.length;
       $('beta-result').textContent='';
       timeline(); feedback(); editDefaults(); player.refresh();
     }
@@ -265,34 +324,58 @@
         setStatus('Contact correction applied.');
       } catch(error) { setStatus(error.message); }
     });
+    $('undo-contact').addEventListener('click',()=>{
+      if(!session?.edits.length)return;
+      session.edits.pop();
+      rebuild();
+      setStatus('Last contact correction undone.');
+    });
     $('export').addEventListener('click',()=>{
       if (!session) return;
       const href=URL.createObjectURL(new Blob([JSON.stringify(session)],{type:'application/json'}));
       const a=document.createElement('a'); a.href=href; a.download='climbgen-analysis-v1.json'; a.click();
       setTimeout(()=>URL.revokeObjectURL(href),1000);
     });
-    $('beta').addEventListener('click',()=>{
+    $('beta').addEventListener('click',async()=>{
       const found=session?.contacts?.filter(c=>c.confidence>=.6)??[];
       const hands=found.filter(c=>c.limb.endsWith('Hand'));
-      if(hands.length<2) { $('beta-result').textContent='Confirm more hand placements to generate an alternative.';return; }
-      const startTime=hands[0].start+.5;
-      const starts=new Set(hands.filter(c=>c.start<=startTime && c.end>startTime-.5).map(c=>c.id));
+      if(!hands.length) { $('beta-result').textContent='Confirm hand placements first.';return; }
+      const first=hands[0];
+      const other=hands.find(c=>c.limb!==first.limb && c.start<first.end && c.start-first.start<=.35);
+      const starts=new Set(other ? [first.id,other.id] : [first.id]);
       const finish=hands.at(-1).id;
       const role=new Map(found.map(c=>[c.id,8]));
       for(const c of hands) role.set(c.id,6);
       for(const id of starts) role.set(id,5);
       if(starts.has(finish)) { $('beta-result').textContent='Confirm an observed finish on a different hold.';return; }
       role.set(finish,7);
-      const revision=resultsRevision;
+      if(![...role.values()].includes(6) || ![...role.values()].includes(8)) {
+        $('beta-result').textContent='Confirm an intermediate handhold and at least one separate foothold.';
+        return;
+      }
+      betaJob?.abort();
+      const job=new AbortController();
+      betaJob=job;
+      $('beta').disabled=true;
       $('beta-result').textContent='Searching for model-generated beta…';
-      requestAnimationFrame(()=>setTimeout(()=>{
-        if(!visible || revision!==resultsRevision)return;
-        try {
-          const result=root.ClimbGenPlanner.plan({holds:[...role].map(([id,role])=>({id,role}))},holdMap,{maxExpanded:550,beamWidth:30,maxDepth:32});
+      try {
+        const result=await root.ClimbGenPlanner.planAsync(
+          {holds:[...role].map(([id,role])=>({id,role}))},holdMap,
+          {maxExpanded:550,beamWidth:30,maxDepth:32,signal:job.signal}
+        );
+        if(!job.signal.aborted && betaJob===job) {
           $('beta-result').textContent=result.ok?'Model-generated option · '+result.steps.map(s=>label[s.limb]+' #'+s.id).join(' → '):
             'No alternative was found for those estimated holds. Review the contact sequence and try again.';
-        }catch { $('beta-result').textContent='An alternative could not be computed for these contacts.'; }
-      },0));
+        }
+      } catch {
+        if(!job.signal.aborted) $('beta-result').textContent='An alternative could not be computed for these contacts.';
+      } finally {
+        if(betaJob===job) {
+          betaJob=null;
+          $('beta').disabled=(session?.contacts?.length??0)<3;
+          if(job.signal.aborted) $('beta-result').textContent='';
+        }
+      }
     });
     function seekButton(text,time) {
       const button=document.createElement('button');
@@ -304,18 +387,32 @@
       const target=$('markers');
       target.replaceChildren();
       if(!session) return;
-      for (const [name,events] of [['Contacts',session.contacts??[]],['Technique',session.events??[]]]) {
+      const lanes=wire.map(limb=>[label[limb],session.contacts.filter(c=>c.limb===limb)]);
+      lanes.push(['Technique',session.events??[]]);
+      for (const [name,events] of lanes) {
+        const lane=document.createElement('div');
+        lane.className='analysis-lane';
+        const heading=document.createElement('span');
+        heading.textContent=name;
         const track=document.createElement('div'); track.className='analysis-track';
         track.setAttribute('role','group'); track.setAttribute('aria-label',name+' markers');
         for (const c of events) {
-          const title=(c.category??label[c.limb]+' #'+c.id)+' · '+c.start.toFixed(2)+' s';
-          const button=seekButton('',c.start);
-          button.className='analysis-tick'; button.title=title; button.setAttribute('aria-label',title);
+          const title=(c.category??label[c.limb]+' #'+c.id)+' · '+c.start.toFixed(2)+'–'+c.end.toFixed(2)+' s'+
+            (c.source==='manual'?' · Corrected':'');
+          const button=seekButton('',c.limb?c.start+Math.min(.045,(c.end-c.start)/2):c.start);
+          button.className=c.limb?'analysis-tick analysis-contact-tick':'analysis-tick';
+          button.title=title; button.setAttribute('aria-label',title);
           button.style.left=(c.start/video.duration*100)+'%';
-          button.style.background=c.limb?color(c.limb):gold;
+          button.style.setProperty('--marker-color',c.limb?color(c.limb):gold);
+          if(c.limb) {
+            button.style.width=((c.end-c.start)/video.duration*100)+'%';
+            button.classList.toggle('manual',c.source==='manual');
+            button.addEventListener('click',()=>{$('contact-form').closest('details').open=true;editDefaults(c);});
+          }
           track.append(button);
         }
-        target.append(track);
+        lane.append(heading,track);
+        target.append(lane);
       }
       const trace=$('force-trace');
       if(!trace) return;
@@ -371,14 +468,15 @@
         ctx.font='10px monospace';ctx.fillStyle='#fff';ctx.strokeStyle='#142021';ctx.lineWidth=2.5;
         ctx.strokeText(id,p.x*w+4,p.y*h-2);ctx.fillText(id,p.x*w+4,p.y*h-2);
       }
-      if(calibration){
-        const ids=$('show-holds').checked;
+      const projectedBoard=draft?preview:calibration;
+      if(projectedBoard){
+        const ids=$('show-holds').checked || Boolean(preview);
         if(ids) for(const [id,h] of holds){
-          const p=calibration.project(h.x,h.y);
+          const p=projectedBoard.project(h.x,h.y);
           dot(p,2,'#a7e687bb');
           if(id===hoveredHold || id===$('edit-hold').value) idAt(id,p);
         }
-        for(const c of active) {
+        if(!draft) for(const c of active) {
           const h=holds.get(c.id);
           if(!h)continue;
           const p=calibration.project(h.x,h.y);
@@ -388,8 +486,9 @@
         }
       }
       if (draft) draft.forEach((p,i)=>{
-        dot(p,7,'#b8ef66'); idAt(String(i+1),p);
+        dot(p,i===selectedCorner?10:7,i===selectedCorner?gold:'#b8ef66'); idAt(String(i+1),p);
         if(i) line(draft[i-1],p,'#b8ef66',3,[6,4]);
+        if(i===3) line(p,draft[0],'#b8ef66',3,[6,4]);
       });
       if(frame?.image && $('show-pose').checked){
         for(const [a,b] of M.links){
@@ -477,19 +576,22 @@
       $('timebar').value=String(t);
       const frame=M.sample(session?.frames??[],t);
       const sampleIndex=session ? V.lowerBound(session.frames,t,f=>f.t) : 0;
-      const rows=session?.motion??[];
-      let movement=rows[sampleIndex];
-      if(sampleIndex && (!movement || Math.abs(movement.t-t)>Math.abs(rows[sampleIndex-1].t-t))) movement=rows[sampleIndex-1];
-      if(frame?.image && movement) movement={...movement,center:M.centerOfMass(frame.image)};
+      const movement=M.motionAt(session?.motion??[],frame,t,metadata.width/metadata.height);
       const active=M.contactAt(session?.contacts??[],t===metadata.duration ? t-.0001:t);
       const sample=viewSample(t,active);
       const fit=frame?.image?sample.pose:null;
       const pose=fit?.quality>=.3 && fit.boneError<=4.5 ? fit:null;
-      const forces=fit?sample.forces:null;
+      let forces=fit?sample.forces:null;
+      if(forces?.balance && frame.kind==='interpolated' && (movement?.speed==null || movement.speed>.15)) {
+        forces={status:'No static estimate between these frames'};
+      }
       const status=frame?.image ? ' · '+(frame.kind==='observed'?'Tracked sample '+(sampleIndex+1):frame.kind==='interpolated'?'Interpolated pose':'Nearest sample') :
         session ? ' · No tracked pose' : '';
       $('time').textContent=t.toFixed(3)+' / '+metadata.duration.toFixed(3)+' s'+status;
       $('time').title=meta.presented?'Decoded frame timestamp':'Video seek time';
+      const stepStatus=$('step-status');
+      if(meta.sampled) {stepStatus.textContent='Stepped by sample time';stepStatus.hidden=false;}
+      else if(stepStatus.textContent!=='Finding frame…') stepStatus.hidden=true;
       $('fit').textContent=pose?'Estimated from video · '+Math.round(pose.quality*100)+'% fit confidence · '+pose.fitError.toFixed(1)+' in model adjustment':
         fit?'3D fit hidden · Low confidence or inconsistent limb lengths.':
         calibration?'No usable 3D fit at this time.':'Mark board corners to align the estimated body with the wall.';

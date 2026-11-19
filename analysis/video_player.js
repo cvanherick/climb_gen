@@ -46,17 +46,13 @@
     });
   }
   function attach(video, draw) {
-    const knownTimes = [];
-    let time = 0, presented = false, stepped = null, seekEpoch = 0;
-    function record(t) {
-      const index = lowerBound(knownTimes, t);
-      if (knownTimes[index] !== t) knownTimes.splice(index,0,t);
-    }
-    function render(t, exact) {
+    let time = 0, presented = false, sampledStep = false, stepped = null, seekEpoch = 0, observedFrame = false;
+    function render(t, exact, sampled = false) {
       time = t;
       presented = exact;
-      if (exact) record(t);
-      draw(t, { presented:exact, indexed:exact ? lowerBound(knownTimes,t)+1 : null });
+      sampledStep = sampled;
+      observedFrame ||= exact;
+      draw(t, { presented:exact, sampled });
     }
     function frame(_now, metadata) {
       if (!video.seeking && !stepped) render(metadata.mediaTime,true);
@@ -65,10 +61,16 @@
     video.requestVideoFrameCallback?.(frame);
     function refresh() {
       if (!stepped && (!presented || Math.abs(video.currentTime-time)>.15)) render(video.currentTime,false);
-      else if (!stepped) draw(time,{presented,indexed:presented ? lowerBound(knownTimes,time)+1 : null});
+      else if (!stepped) draw(time,{presented,sampled:sampledStep});
     }
     video.addEventListener('seeked', () => { if (!stepped) render(video.currentTime,false); });
     video.addEventListener('timeupdate', () => { if (!video.requestVideoFrameCallback && !stepped) refresh(); });
+    function cancelStep() {
+      seekEpoch++;
+      stepped?.abort();
+      stepped=null;
+    }
+    video.addEventListener('play',cancelStep);
     // Discover the boundary of the adjacent decoded frame using the media
     // timestamps. The fallback uses the analyzed timestamps on older browsers.
     async function step(direction, samples) {
@@ -84,9 +86,13 @@
         const start = presented ? {time:original,presented:true} :
           await seekDecoded(video, original,controller.signal);
         const origin = start.time;
-        if (video.requestVideoFrameCallback && (start.presented || knownTimes.length)) {
+        if (video.requestVideoFrameCallback && observedFrame) {
+          let previousTarget=null;
           while (far <= 1.024) {
-            const decoded = await seekDecoded(video,Math.min(end,Math.max(0,origin+direction*far)),controller.signal);
+            const target=Math.min(end,Math.max(0,origin+direction*far));
+            if(target===previousTarget) break;
+            previousTarget=target;
+            const decoded = await seekDecoded(video,target,controller.signal);
             if (!decoded.presented) { if (near===0) { far*=2; continue; } break; }
             if ((decoded.time-origin)*direction>.0001) { candidate = decoded; break; }
             near = far;
@@ -105,14 +111,15 @@
         const fallback = samples[lowerBound(samples,original + (direction>0 ? .002 : -.002)) - (direction<0 ? 1 : 0)];
         const target = candidate ? candidate.time+.0005 : fallback ?? Math.min(end,Math.max(0,original + direction/12));
         const result = await seekDecoded(video,target,controller.signal);
-        if (epoch===seekEpoch) render(candidate?.time ?? result.time,candidate?.presented ?? result.presented);
+        if (epoch===seekEpoch) render(candidate?.time ?? result.time,Boolean(candidate),!candidate);
       } finally { if (stepped === controller) stepped = null; }
     }
     return {
       get time() { return time; },
       refresh,
-      reset() { stepped?.abort(); stepped=null; seekEpoch++; knownTimes.length=0; render(0,false); },
-      seek(t) { stepped?.abort(); stepped=null; seekEpoch++; video.pause(); video.currentTime=t; render(t,false); },
+      reset() { cancelStep(); observedFrame=false; render(0,false); },
+      seek(t) { cancelStep(); video.pause(); video.currentTime=t; render(t,false); },
+      cancelStep,
       async step(direction,samples) { if (!stepped) await step(direction,samples); },
     };
   }

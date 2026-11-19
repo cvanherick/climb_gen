@@ -147,10 +147,33 @@ test('frame navigation and all dependent views use presented timestamps on varia
   const player=Video.attach(video,(t,meta)=>seen.push({t,...meta}));
   player.seek(.12);
   await new Promise(resolve=>setImmediate(resolve));
-  assert.deepEqual(seen.at(-1),{t:.091,presented:true,indexed:1});
+  assert.deepEqual(seen.at(-1),{t:.091,presented:true,sampled:false});
   await player.step(1,[0,.08,.16,.24]);
   close(player.time,.145);
   assert.equal(seen.at(-1).presented,true);
   await player.step(-1,[0,.08,.16,.24]);
   close(player.time,.091);
+});
+
+test('motion metrics do not cross missing or low-confidence frames',()=>{
+  const raw=(t,x,visibility=.98)=>({t,image:Array.from({length:33},()=>({x,y:.4,z:0,visibility})),world:null});
+  const frames=Model.smooth([raw(0,.1),raw(.08,.2),{t:.16,image:null},raw(.24,.6),raw(.32,.7)]);
+  const rows=Model.motion(frames);
+  assert.equal(Model.motionAt(rows,Model.sample(frames,.15),.15),null);
+  assert.equal(rows[2].speed,null);
+  assert.equal(rows[1].acceleration,null);
+  assert.equal(rows[3].acceleration,null);
+  const weak=Model.smooth([raw(0,.1,.4),raw(.08,.2,.4),raw(.16,.3,.4)]);
+  assert.equal(Model.motion(weak)[1].velocity,null);
+});
+
+test('stepping without presented frame metadata reports use of a sample timestamp',async()=>{
+  const video=new FixtureVideo([]);
+  video.requestVideoFrameCallback=undefined;
+  const seen=[];
+  const player=Video.attach(video,(t,meta)=>seen.push({t,...meta}));
+  player.seek(.2);
+  await new Promise(resolve=>setImmediate(resolve));
+  await player.step(1,[.13,.25,.37]);
+  assert.deepEqual(seen.at(-1),{t:.25,presented:false,sampled:true});
 });

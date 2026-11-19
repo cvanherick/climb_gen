@@ -224,6 +224,11 @@
     return new Promise((resolve) => {
       const pump = () => {
         try {
+          if (options.signal?.aborted) {
+            iterator.return();
+            resolve({ ok: false, reason: 'Planning cancelled.', expanded: 0 });
+            return;
+          }
           // One full beam-expansion pass can be costly, so yield to the browser
           // after each expanded state to keep paint and buttons responsive.
           const step = iterator.next();

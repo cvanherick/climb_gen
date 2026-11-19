@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=bf45a2a544b7" />
+    <link rel="stylesheet" href="./styles.css?v=a86a7b48ea70" />
   </head>
   <body>
     <div class="app-shell">
@@ -123,8 +123,10 @@
                 </div>
                 <div class="analysis-actions">
                   <button id="analysis-calibrate" class="view-button" type="button">Mark board corners</button>
+                  <button id="analysis-corner-apply" class="view-button" type="button" hidden>Apply corners</button>
                   <button id="analysis-corner-undo" class="view-button" type="button" hidden>Undo corner</button>
                   <button id="analysis-corner-cancel" class="view-button" type="button" hidden>Cancel marking</button>
+                  <button id="analysis-corner-reset" class="view-button" type="button" hidden>Clear alignment</button>
                   <button id="analysis-fullscreen" class="view-button" type="button">Fullscreen</button>
                 </div>
                 <p id="analysis-calibration-status" class="analysis-hint" role="status">Mark the corners of the full board face to identify contacts.</p>
@@ -149,6 +151,7 @@
                 <button id="analysis-next" class="view-button" type="button" aria-label="Next frame">Frame ›</button>
                 <label>Speed <select id="analysis-speed"><option value="1">1×</option><option value=".5">0.5×</option><option value=".25">0.25×</option><option value=".1">0.1×</option></select></label>
                 <output id="analysis-time">0.000 s</output>
+                <span id="analysis-step-status" class="analysis-hint" role="status" hidden></span>
               </div>
               <input id="analysis-timebar" type="range" min="0" max="1" step=".001" value="0" aria-label="Video time" />
               <div id="analysis-markers" class="analysis-markers" aria-label="Contact and coaching timeline"></div>
@@ -179,7 +182,8 @@
                     <label>To (s) <input id="analysis-edit-end" type="number" min="0" step=".001" required /></label>
                     <button id="analysis-save-contact" class="view-button" type="submit">Apply correction</button>
                   </form>
-                  <p class="analysis-hint">Select a predicted contact to edit it, or click a projected hold to fill in its ID.</p>
+                  <button id="analysis-undo-contact" class="view-button" type="button" disabled>Undo last correction</button>
+                  <p class="analysis-hint">Select a contact in the timeline or click a projected hold to fill in its ID.</p>
                 </details>
                 <button id="analysis-export" class="view-button" type="button" disabled>Download analysis JSON</button>
               </section>
@@ -197,14 +201,14 @@
       </main>
     </div>
     <script src="./data/tb2-hold-spectrum.js?v=e9ac7adfa09b"></script><script src="./data/tb2-hold-profiles.js?v=c16674ac3438"></script><script src="./data/tb2-hold-geometry.js?v=363739a5346e"></script><script src="./data/tb2-mirror-40.js?v=6a1446fbed0e"></script><script src="./data/tb2-route-evaluator.js?v=d754ea92a8ac"></script>
-    <script src="./hold_spectrum.js?v=59163f5eaf04"></script><script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=ef37ab0bd574"></script><script src="./route_generator.js?v=8a7d8f4a7a67"></script><script src="./ik.js?v=8385777aba58"></script><script src="./animation.js?v=ee49b68b634b"></script><script src="./board_3d.js?v=84ee91fca255"></script><script src="./planner.js?v=a5a1409e5e37"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
-    <script src="./analysis/video_player.js?v=e75155903e82"></script>
+    <script src="./hold_spectrum.js?v=59163f5eaf04"></script><script src="./hold_profiles.js?v=395fc2c9ba81"></script><script src="./route_evaluator.js?v=ef37ab0bd574"></script><script src="./route_generator.js?v=8a7d8f4a7a67"></script><script src="./ik.js?v=8385777aba58"></script><script src="./animation.js?v=ee49b68b634b"></script><script src="./board_3d.js?v=84ee91fca255"></script><script src="./planner.js?v=0dcb372f21ae"></script><script src="./photo_suggestions.js?v=f25a2f44be71"></script><script src="./photo_hold_detector.js?v=247180338f1a"></script>
+    <script src="./analysis/video_player.js?v=c27b3d8016c0"></script>
     <script src="./analysis/calibration.js?v=87257e00af90"></script>
-    <script src="./analysis/analysis_model.js?v=e879a5db77da"></script>
+    <script src="./analysis/analysis_model.js?v=4eda963024d3"></script>
     <script src="./analysis/reconstruction.js?v=74c2accb40f3"></script>
     <script src="./analysis/feedback_engine.js?v=25bf80efe59a"></script>
     <script src="./analysis/pose_tracker.js?v=2dca7873a508"></script>
-    <script src="./analysis/analysis_ui.js?v=2181e7876ea3"></script>
+    <script src="./analysis/analysis_ui.js?v=92319a88191c"></script>
     <script src="./app.js?v=3b3702bb2349"></script>
   </body>
 </html>
