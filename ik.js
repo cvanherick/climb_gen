@@ -126,6 +126,35 @@
   function segmentViolation(a, b, d) {
     return Math.max(0, Math.abs(a - b) + 1.5 - d, d - (a + b - 1.5));
   }
+  function spatialSegmentDistance(point,a,b) {
+    const ray=vector(a,b),offset=vector(a,point);
+    const along=clamp(dot(ray,offset)/(dot(ray,ray)||1),0,1);
+    return Math.hypot(...offset.map((value,i)=>value-ray[i]*along));
+  }
+  function armClearance(shoulder,elbow,hand,body) {
+    // The shoulder is attached to the chest. Exclude that short attached
+    // segment when checking whether the upper arm cuts through the torso.
+    const sleeve=addScaled(shoulder,vector(shoulder,elbow),.30);
+    const headGap=Math.min(spatialSegmentDistance(body.head,shoulder,elbow),
+      spatialSegmentDistance(body.head,elbow,hand)) - 4.1;
+    const neckGap=Math.min(spatialSegmentDistance(body.neck,sleeve,elbow),
+      spatialSegmentDistance(body.neck,elbow,hand)) - 3.35;
+    const chestGap=Math.min(spatialSegmentDistance(body.chest,sleeve,elbow),
+      spatialSegmentDistance(body.chest,elbow,hand)) - 4.2;
+    const gap=Math.min(headGap,neckGap,chestGap);
+    return {gap,cost:Math.max(0,-headGap)**2+Math.max(0,-neckGap)**2+.7*Math.max(0,-chestGap)**2};
+  }
+  function bendCircleAxes(x,y,z) {
+    // Transport the wall axes from a limb pointing into the wall. Use an
+    // orthonormal fallback if the limb points straight away from it.
+    const denominator=1-z;
+    if(denominator<1e-8) {
+      const side=unit([1-x*x,-x*y,-x*z]);
+      return [side,cross([x,y,z],side)];
+    }
+    return [[1-x*x/denominator,-x*y/denominator,x],
+      [-x*y/denominator,1-y*y/denominator,y]];
+  }
   function hipAngles(thigh,down,right,forward,side) {
     const vertical=dot(thigh,down),ahead=dot(thigh,forward);
     const extension=Math.asin(Math.max(0,-ahead))*DEG;
@@ -134,11 +163,11 @@
     const elevation=Math.acos(clamp(vertical,-1,1))*DEG;
     return {elevation,extension,side:Math.asin(clamp(side*dot(thigh,right),-1,1))*DEG};
   }
-  function twoBone(root, target, upper, lower, bendSide, outward = 0, knee = null) {
+  function twoBone(root, target, upper, lower, bendSide, outward = 0, knee = null, arm = null) {
     const dx = target.x - root.x, dy = target.y - root.y, dz = (target.z || 0) - (root.z || 0);
-    const raw = Math.max(1e-5, Math.hypot(dx, dy, dz));
+    const raw = Math.hypot(dx, dy, dz);
     const d = Math.max(Math.abs(upper - lower) + 0.001, Math.min(upper + lower - 0.001, raw));
-    const ux = dx / raw, uy = dy / raw, uz = dz / raw;
+    const ux = raw ? dx / raw : 0, uy = raw ? dy / raw : -1, uz = raw ? dz / raw : 0;
     const along = (upper * upper + d * d - lower * lower) / (2 * d);
     const across = Math.sqrt(Math.max(0, upper * upper - along * along));
     if (root.z != null) {
@@ -146,15 +175,14 @@
         const center = addScaled(root,[ux,uy,uz],along);
         // Transport the wall axes to the leg chord. This stays continuous
         // when a planted toe passes directly below its hip in the board view.
-        const denom=Math.max(.001,1-uz);
-        const sideAxis=[1-ux*ux/denom,-ux*uy/denom,ux];
-        const upAxis=[-ux*uy/denom,1-uy*uy/denom,uy];
+        const [sideAxis,upAxis]=bendCircleAxes(ux,uy,uz);
         // A high foot needs room for the knee to open sideways and down.
         // A low foot can use more upward knee travel before the next step.
         const restPhase=Math.atan2(-.26-.55*uy,knee.side*.75)+knee.yaw*.35;
         const onCircle=phase=>addScaled(center,
           sideAxis.map((v,i)=>v*Math.cos(phase)+upAxis[i]*Math.sin(phase)),across);
         const {down,right,forward}=knee.frame;
+        const toeSide=dot(unit(vector(root,target)),right)*knee.side;
         const loss=phase=>{
           const point=onCircle(phase);
           const thigh=unit(vector(root,point));
@@ -162,11 +190,12 @@
           const ankle=90-angleBetween(vector(target,point),knee.shoeAxis);
           const behind=Math.max(0,-ahead-.43);
           const folded=Math.max(0,-vertical-.36);
-          const spread=Math.max(0,-lateral-.58,lateral-.75);
+          const spread=Math.max(0,-lateral-.36,lateral-.65);
+          const tuck=Math.max(0,.32-vertical)*Math.max(0,.8-toeSide);
           const ankleExcess=Math.max(0,-37-ankle,ankle-35)/30;
           const closeToWall=Math.max(0,2.2-point.z);
-          const lowKnee=Math.max(0,1.6-point.y*knee.upY+point.z*knee.upZ);
-          return 6*behind**2+14*folded**2+5*spread**2+ankleExcess**2+.24*(phase-restPhase)**2
+          const lowKnee=Math.max(0,1.6-(point.y*knee.upY-point.z*knee.upZ));
+          return 6*behind**2+14*folded**2+9*spread**2+8*tuck**2+ankleExcess**2+.24*(phase-restPhase)**2
             +.25*closeToWall**2+.25*lowKnee**2;
         };
         // Slide the kneecap along its analytic joint circle, preserving
@@ -179,6 +208,41 @@
           }
         }
         return {...onCircle(phase),bendOffset:phase-restPhase};
+      }
+      if(arm) {
+        const center=addScaled(root,[ux,uy,uz],along);
+        const [sideAxis,upAxis]=bendCircleAxes(ux,uy,uz);
+        const restPhase=Math.atan2(-.55,arm.side*.84)+arm.yaw*.45;
+        const onCircle=offset=>{
+          const angle=restPhase+offset;
+          const tangent=sideAxis.map((value,i)=>value*Math.cos(angle)+upAxis[i]*Math.sin(angle));
+          return addScaled(center,tangent,across);
+        };
+        const loss=offset=>{
+          const elbow=onCircle(offset);
+          const clearance=armClearance(root,elbow,target,arm.body);
+          const elbowIn=Math.max(0,-arm.side*dot(vector(root,elbow),arm.right)-2.5);
+          return 5.5*clearance.cost+.42*elbowIn**2+2*Math.max(0,1.3-elbow.z)**2+2.5*offset**2;
+        };
+        let offset=arm.offset??0;
+        if(arm.offset==null) {
+          // Keep a neutral bend when clear. If an occluded grip needs a
+          // different bend plane, choose the least conflicting local pose.
+          let best=loss(0);
+          if(best>.03) {
+            for(const candidate of [-.5,.5,-1,1,-1.5,1.5,-2,2]) {
+              const score=loss(candidate);
+              if(score<best) {best=score;offset=candidate;}
+            }
+            for(let i=0;i<4;i++) {
+              for(const next of [offset-.12,offset+.12]) {
+                const candidate=clamp(next,-2.2,2.2),score=loss(candidate);
+                if(score<best) {best=score;offset=candidate;}
+              }
+            }
+          }
+        }
+        return {...onCircle(offset),bendOffset:offset};
       }
       // Rotate the bend plane out of the wall for the elbows, retaining
       // the path's selected left/right branch.
@@ -459,14 +523,33 @@
         minRadius:reach(JOINT_LIMITS[leg?'knee':'elbow'][2]+1), flexed: leg ? reach(kneeAngle) : null };
     });
     let depth = space.depth;
+    const hands = geometry.targets.filter(({limb})=>LIMBS[limb].kind==='arm').map(({target})=>target);
+    const {neck,head}=bodyHead(constrained,body,motion);
+    const trunk=unit(vector({...constrained,z:depth},neck));
+    const upperBody=[
+      [head,5.4],
+      [neck,5.3],
+      [addScaled(neck,trunk,-4.8),6.0],
+    ].map(([point,radius])=>({x:point.x-torso.x,y:point.y-torso.y,z:point.z-depth,radius}));
+    function makeRoomForHands() {
+      // A grip in front of the face or sternum needs room for the palm
+      // and forearm. Let the rib cage move out while the holds stay fixed.
+      let requested=depth;
+      for(const pad of upperBody) for(const hand of hands) {
+        const dx=constrained.x+pad.x-hand.x,dy=constrained.y+pad.y-hand.y;
+        const room=pad.radius**2-dx**2-dy**2;
+        if(room>0) requested=Math.max(requested,(hand.z||0)-pad.z+Math.sqrt(room));
+      }
+      depth+=Math.min(2.5,(requested-depth)*.6);
+    }
     const wallAngle = overhangDeg * Math.PI / 180;
     const upY = Math.cos(wallAngle), upZ = -Math.sin(wallAngle);
     const height = p => p.y*upY+(p.z||0)*upZ;
     // Use the lowest possible gaze within the current neck angle so later
     // torso projection cannot invalidate the clearance through a head turn.
-    const head=bodyHead(constrained,body).head;
-    head.y-=body.headRadius*1.65*(Math.cos(constrained.theta)-Math.cos(Math.abs(constrained.theta)+.32*(motion?.attention??0)));
-    const offsetY=head.y-torso.y, offsetHeight=height(head)-height({y:torso.y,z:depth});
+    const lowHead=bodyHead(constrained,body).head;
+    lowHead.y-=body.headRadius*1.65*(Math.cos(constrained.theta)-Math.cos(Math.abs(constrained.theta)+.32*(motion?.attention??0)));
+    const offsetY=lowHead.y-torso.y, offsetHeight=height(lowHead)-height({y:torso.y,z:depth});
     let minY=-Infinity,minHeight=4.5;
     for(const {limb,target} of geometry.targets) if (LIMBS[limb].kind==='leg') {
       const shoe=shoeAt(target,constrained,body,LIMBS[limb].side);
@@ -497,6 +580,7 @@
     // Bias the pose toward usable knee flexion. The final reach pass can
     // relax this preference when contacts span an unusually long stance.
     for (let iteration = 0; iteration < 9; iteration++) {
+      makeRoomForHands();
       for (const limit of limits) {
         if (limit.flexed) project(limit, limit.flexed, 0.5);
         project(limit,limit.minRadius,.65,true);
@@ -505,8 +589,10 @@
       clearFloor();
     }
     for (let iteration = 0; iteration < 42; iteration++) {
-      const reachCorrection = limits.reduce((sum, limit) =>
-        sum + project(limit,limit.minRadius,.7,true) + project(limit,limit.radius,1),0);
+      // Finish with the convex reach and floor constraints. Enforcing the
+      // minimum bend radius here can switch sides suddenly when the moving
+      // hand passes close to the shoulder.
+      const reachCorrection = limits.reduce((sum, limit) => sum + project(limit, limit.radius, 1), 0);
       if (reachCorrection + clearFloor() < 0.001) break;
     }
     // On a long reach the pelvis can be drawn closer to the board. Ease
@@ -772,6 +858,9 @@
     const pelvisRight=unit(vector(rootFor('leftFoot',torso,body),rootFor('rightFoot',torso,body)));
     const trunkUp=unit(vector({...pose.points.pelvis,z:pose.depth?.pelvis},neck));
     const hipFrame={down:trunkUp.map(x=>-x),right:pelvisRight,forward:unit(cross(trunkUp,pelvisRight))};
+    const upperBody={head,neck,chest:addScaled(neck,trunkUp,-4.8)};
+    const chestRight=unit(vector(leftShoulder,rightShoulder));
+    let bodyCollision=0,minArmClearance=Infinity;
     let maxSegmentResidual = 0;
     for (const limb of Object.keys(LIMBS)) {
       const id = contacts[limb];
@@ -789,10 +878,12 @@
         : 0;
       const knee = torso.space && kind === 'leg'
         ? {side,yaw:torso.space.hipYaw,frame:hipFrame,shoeAxis:vector(shoeAt(endpoint,torso,body,side).heel,endpoint),
-          upY:Math.cos((options.overhangDeg??40)*RAD),upZ:Math.sin((options.overhangDeg??40)*RAD),offset:options.kneeOffsets?.[limb]}
+          upY:Math.cos((options.overhangDeg??40)*RAD),upZ:Math.sin((options.overhangDeg??40)*RAD),offset:options.bendOffsets?.[limb]}
         : null;
-      const primary = twoBone(root, boneEndpoint, a, b, bendSide, outward, knee);
-      const candidates = [primary, knee ? primary : twoBone(root, boneEndpoint, a, b, -bendSide, outward)];
+      const arm=torso.space && kind==='arm'
+        ? {side,yaw:torso.space.chestYaw,right:chestRight,body:upperBody,offset:options.bendOffsets?.[limb]}:null;
+      const primary = twoBone(root, boneEndpoint, a, b, bendSide, outward, knee, arm);
+      const candidates = [primary, knee || arm ? primary : twoBone(root, boneEndpoint, a, b, -bendSide, outward)];
       const jointScore = (joint, index) => {
         const continuity = previousJoint ? Math.hypot(joint.x - previousJoint.x, joint.y - previousJoint.y) / (a + b) : 0;
         const direction = LIMBS[limb].kind === 'arm' ? directionPenalty(endpoint, joint).cost : 0;
@@ -802,9 +893,14 @@
       const chosenIndex = locked === bendSide ? 0 : locked === -bendSide ? 1
         : jointScore(candidates[0], 0) <= jointScore(candidates[1], 1) ? 0 : 1;
       const joint = candidates[chosenIndex];
-      if(knee) {
-        pose.kneeOffsets??={};
-        pose.kneeOffsets[limb]=joint.bendOffset;
+      if(knee || arm) {
+        pose.bendOffsets??={};
+        pose.bendOffsets[limb]=joint.bendOffset;
+      }
+      if(arm) {
+        const clearance=armClearance(root,joint,boneEndpoint,upperBody);
+        bodyCollision+=clearance.cost;
+        minArmClearance=Math.min(minArmClearance,clearance.gap);
       }
       pose.bendDirections ||= {};
       pose.bendDirections[limb] = chosenIndex === 0 ? bendSide : -bendSide;
@@ -825,10 +921,12 @@
     pose.diagnostics.jointAnglesDeg=joints.angles;
     pose.diagnostics.jointViolationsDeg=joints.outside;
     pose.diagnostics.articulationCost=joints.comfort;
+    pose.diagnostics.bodyCollision=bodyCollision;
+    pose.diagnostics.minArmClearance=minArmClearance;
     pose.diagnostics.footClearance=joints.footClearance;
     pose.diagnostics.maxAngleViolationDeg=joints.maxViolation;
     pose.diagnostics.kinematic = pose.diagnostics.reachable && maxSegmentResidual < 0.1
-      && joints.maxViolation<.1 && joints.footClearance>=FOOT_BELOW_HEAD-.001;
+      && joints.maxViolation<.1 && joints.footClearance>=FOOT_BELOW_HEAD-.001 && minArmClearance>=-.1;
     if (pose.depth) pose.diagnostics.centerOfMass = spatialCenterOfMass(pose.points, pose.depth);
     if (motion) pose.motion = motion;
     return pose;

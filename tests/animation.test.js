@@ -163,3 +163,34 @@ test('a mapped grip anchors the hand and force at the same hold patch',()=>{
   assert.ok(pose.diagnostics.jointAnglesDeg.leftWrist>1);
   assert.ok(pose.hands.left.fingers.every(chain=>chain.every(point=>Number.isFinite(point.z))));
 });
+
+test('a cross-body grip clears the head and neck without moving the hand', () => {
+  const placements = {
+    lh: { x: 2, y: 57, z: 1 }, rh: { x: 14, y: 66, z: 1 },
+    lf: { x: -8, y: 15, z: 1 }, rf: { x: 11, y: 16, z: 1 },
+  };
+  const contacts = { leftHand: 'lh', rightHand: 'rh', leftFoot: 'lf', rightFoot: 'rf' };
+  const pose = IK.poseAt({ x: 0, y: 38, theta: -0.23 }, contacts, placements,
+    { space: { depth: 8, pitch: -0.24, hipYaw: 0, chestYaw: 0 } });
+  assert.ok(pose.diagnostics.minArmClearance > 1);
+  assert.ok(pose.diagnostics.maxSegmentResidual < 0.01);
+  assert.deepEqual(pose.points.leftHand, { x: 2, y: 57 });
+  assert.equal(pose.depth.leftHand, 1);
+});
+
+test('a high toe near the pelvis can keep its knee below and toward the wall', () => {
+  const placements = {
+    lh: { x: -10, y: 59, z: 1 }, rh: { x: 12, y: 64, z: 1 },
+    lf: { x: -1, y: 40, z: 1 }, rf: { x: -10, y: 18, z: 1 },
+  };
+  const contacts = { leftHand: 'lh', rightHand: 'rh', leftFoot: 'lf', rightFoot: 'rf' };
+  const pose = IK.poseAt({ x: 0, y: 38, theta: -0.2 }, contacts, placements,
+    { space: { depth: 9, pitch: -0.24, hipYaw: 0.16, chestYaw: 0 } });
+  const { leftHip, leftKnee } = pose.points;
+  assert.ok(leftHip.y - leftKnee.y > 6);
+  assert.ok(Math.abs(leftHip.x - leftKnee.x) < 8);
+  assert.ok(pose.depth.leftKnee < pose.depth.leftHip);
+  assert.ok(pose.diagnostics.maxSegmentResidual < 0.01);
+  assert.deepEqual(pose.points.leftFoot, { x: -1, y: 40 });
+  assert.equal(pose.depth.leftFoot, 1);
+});
