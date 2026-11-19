@@ -445,7 +445,7 @@
     }
     return { x: center.x / total, y: center.y / total, z: center.z / total };
   }
-  function supportForces(pose, overhangDeg = 40) {
+  function supportForces(pose, overhangDeg = 40, previousContacts = null) {
     const center = pose.diagnostics.centerOfMass;
     if (!pose.depth || !Number.isFinite(center.z)) return null;
     const wallAngle = overhangDeg * Math.PI / 180;
@@ -458,7 +458,7 @@
       if (pose.motion?.airborne && pose.motion.movingLimb === limb) continue;
       const point = pose.points[limb];
       if (!point) continue;
-      const origin = { ...point, z: pose.depth[limb] };
+      const origin = { x: point.x, y: point.y, z: pose.depth[limb] };
       const force = { x: 0, y: 0, z: 0 };
       contacts.push({ limb, origin, force });
       const dx = origin.x - center.x, dy = origin.y - center.y, dz = origin.z - center.z;
@@ -473,6 +473,8 @@
         // for upward or lateral support. The exact shoe/hold friction is
         // unknown, so keep this cone deliberately broad.
         directions = [[0, 0, 1], [0, 1, .12], [.48, .84, .35], [-.48, .84, .35], [0, -.30, 1]];
+      } else if (!pose.points[limb.replace('Hand', 'Elbow')]) {
+        directions = [[0, .20, -1], [0, 1, -.20], [.72, .70, -.63], [-.72, .70, -.63]];
       } else {
         // Orient hand reactions to the actual forearm: the hold pushes on the
         // climber roughly from elbow toward hand. This makes each hand's
@@ -481,7 +483,7 @@
         const elbowKey = limb.replace('Hand', 'Elbow');
         const elbow = pose.points[elbowKey];
         const elbowDepth = pose.depth[elbowKey] || 0;
-        let axis = elbow ? [origin.x - elbow.x, origin.y - elbow.y, origin.z - elbowDepth] : [0, 1, -1];
+        let axis = [origin.x - elbow.x, origin.y - elbow.y, Math.min(-.025, origin.z - elbowDepth)];
         const magnitude = Math.hypot(...axis) || 1;
         axis = axis.map(value => value / magnitude);
         // Reviewed hold-direction annotations describe the climber pulling
@@ -508,6 +510,7 @@
           axis.map((value, i) => value + .55 * normal[i]),
           axis.map((value, i) => value - .55 * normal[i])];
         directions = directions.map(ray => {
+          ray[2] = Math.min(-.001, ray[2]);
           const length = Math.hypot(...ray) || 1;
           return ray.map(value => value / length);
         });
@@ -518,9 +521,12 @@
         // Penalize each contact's resultant force to avoid large cancelling
         // reactions and solutions that depend on how many rays it has.
         const regularization = spec.kind === 'leg' ? 0.025 : 0.055;
+        const previous = previousContacts?.find(contact => contact.limb === limb)?.force;
+        const continuity = previous ? .07 : 0;
         const norm = column.reduce((sum, value) => sum + value ** 2, 0.004)
-          + regularization * (x ** 2 + y ** 2 + z ** 2);
-        basis.push({ column, norm, regularization, coefficient: 0, force });
+          + (regularization + continuity) * (x ** 2 + y ** 2 + z ** 2);
+        const priorProjection = previous ? x*previous.x + y*previous.y + z*previous.z : 0;
+        basis.push({ column, norm, regularization, continuity, priorProjection, coefficient: 0, force });
       }
     }
     for (let iteration = 0; iteration < 66; iteration++) {
@@ -528,7 +534,8 @@
         const ray = basis[iteration % 2 ? basis.length - i - 1 : i];
         const [x, y, z] = ray.column;
         const { force } = ray;
-        const loadCost = ray.regularization * (x * force.x + y * force.y + z * force.z);
+        const loadCost = (ray.regularization + ray.continuity) * (x * force.x + y * force.y + z * force.z)
+          - ray.continuity * ray.priorProjection;
         const projection = ray.column.reduce((sum, value, i) => sum + value * residual[i],
           0.004 * ray.coefficient + loadCost);
         const next = Math.max(0, ray.coefficient - projection / ray.norm);

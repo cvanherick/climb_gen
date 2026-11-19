@@ -181,10 +181,14 @@
       mesh.tube(origin, base, .34, .34, color);
       mesh.tube(base, tip, 1.05, .01, color);
     }
-    mesh.ellipsoid([balance.center.x, balance.center.y, balance.center.z],
+    if (!balance.hideCenter) mesh.ellipsoid([balance.center.x, balance.center.y, balance.center.z],
       [1.3, 1.3, 1.3], [1, .76, .26]);
-    arrow(balance.center, balance.gravity, [1, .76, .26]);
-    for (const { origin, force } of balance.contacts) arrow(origin, force, [.37, .95, 1]);
+    if (balance.gravity) arrow(balance.center, balance.gravity, [1, .76, .26]);
+    for (const { limb, origin, force } of balance.contacts) {
+      const direction = balance.onHold ? {x:-force.x,y:-force.y,z:-force.z} : force;
+      const color = balance.analysis && limb.endsWith('Foot') ? [.91,.53,1] : [.37,.95,1];
+      arrow(origin, direction, color);
+    }
     return mesh;
   }
 
